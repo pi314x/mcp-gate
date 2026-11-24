@@ -1,0 +1,143 @@
+# mcp-gate
+
+**An MCP server for MCP servers.** It connects to other MCP servers and shows its client only the tools it has decided to enable.
+
+Every MCP server you connect adds its whole tool list to the model's context, whether the task needs it or not. With a few servers that is hundreds of tool definitions, most of them noise, and a model with that much choice picks worse. `mcp-gate` sits in front: it connects to your servers, keeps their catalog to itself, and exposes tools one task at a time.
+
+```
+┌────────────┐  6 gate_* tools +       ┌──────────┐   all tools   ┌──────────────────┐
+│ MCP client │ ◄─ whatever is enabled ─┤ mcp-gate │ ◄────────────►│ MCP server(s)    │
+│ (the model)│ ── call files__read ──► │          │ ── forwards ─►│ files, github …  │
+└────────────┘                         └──────────┘               └──────────────────┘
+```
+
+At first a client sees only six `gate_*` tools. Tools of the downstream servers appear, named `<server>__<tool>`, once the gate enables them, and the gate sends `notifications/tools/list_changed` so the client re-lists.
+
+## How the gate decides
+
+| Tool | What it does |
+|---|---|
+| `gate_route(task)` | Ranks the allowed tools for a task and enables the best few that clear a score floor. **Returns nothing when no tool fits**, which means "use what you have". |
+| `gate_search_tools(query)` | Searches names and descriptions. Returns names and one-line descriptions, never schemas, and enables nothing. |
+| `gate_enable_tools(tools, confirm?)` | Enables tools by name or `*` pattern. The policy of each server has the last word. |
+| `gate_disable_tools(tools \| all)` | Switches tools off again, so the tool list stays short. |
+| `gate_list_servers()` | Which servers are connected, and how many tools each offers. |
+| `gate_status()` | What is enabled for you right now, how often each tool was used, and the limits. |
+
+The decision rests on rules you set, not on a model:
+
+- **Policy per server**: `allow`, `deny` and `confirm` lists of tool names (`*` wildcard). `deny` always wins. A `confirm` tool is enabled only when the caller passes `confirm: true`. A denied tool is never listed, searched, enabled or callable, even through a wildcard.
+- **Capacity**: at most `maxEnabled` tools at once. Anything over the limit is reported, not silently dropped.
+- **Idleness**: tools unused for `idleTtlSec` are switched off again.
+- **Always-on**: `autoEnable` lists tools every session starts with.
+- **Routing** is lexical (names weigh three times descriptions, rarer words weigh more), deterministic, with no model call and no network. It scores only metadata, never schemas, and the floor makes "no match" a real answer. A router that always names a best guess applies tools to tasks they were never meant for.
+
+## Quick start
+
+Requires Node 20 or later.
+
+```bash
+npm install
+npm run build
+cp mcp-gate.config.example.json mcp-gate.config.json   # then edit it
+node dist/index.js --check                             # connects to every server and prints what it found
+```
+
+### As a stdio server (Claude Code, Claude Desktop, any host that spawns it)
+
+```bash
+claude mcp add mcp-gate -- node /absolute/path/to/mcp-gate/dist/index.js --config /absolute/path/to/mcp-gate.config.json
+```
+
+### As a Streamable HTTP server
+
+```bash
+node dist/index.js --http                     # http://127.0.0.1:3737/mcp
+claude mcp add --transport http mcp-gate http://127.0.0.1:3737/mcp
+```
+
+`--port` and `--host` change the address (`MCP_GATE_PORT`, `MCP_GATE_HOST`). `/healthz` answers health checks.
+
+## Configuration
+
+One JSON file (`--config`, `MCP_GATE_CONFIG`, or `./mcp-gate.config.json`). See [`mcp-gate.config.example.json`](mcp-gate.config.example.json).
+
+```jsonc
+{
+  "servers": {
+    // A server the gate starts itself (stdio) …
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/folder"],
+      "policy": { "deny": ["write_*", "edit_*", "move_*"] }
+    },
+    // … or one it reaches over Streamable HTTP.
+    "github": {
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer ${GITHUB_MCP_TOKEN}" },
+      "policy": { "allow": ["get_*", "list_*", "create_issue"], "confirm": ["create_issue"] }
+    }
+  },
+  "gate": {
+    "maxEnabled": 25,     // most tools enabled at once, per session
+    "idleTtlSec": 900,    // switch off tools unused this long (0 = never)
+    "routeFloor": 1,      // minimum score for gate_route to enable a tool
+    "routeTopK": 5,       // most tools gate_route enables for one task
+    "autoEnable": []      // tools every session starts with, e.g. ["filesystem__read_file"]
+  }
+}
+```
+
+- Server names are lowercase letters, digits and single hyphens. They become the tool prefix.
+- `${NAME}` in any string is replaced from the environment, so secrets stay out of the file. A missing variable is an error that names the variable, never a value.
+- A server that cannot connect is reported (`gate_list_servers`, `--check`) and skipped. It never stops the gate.
+
+## Two transports, and what each means for state
+
+Which tools are enabled is state, so how a client is recognised matters.
+
+| Transport | A client is | Change notification |
+|---|---|---|
+| **stdio** | the process: one process, one session | `tools/list_changed` |
+| **Streamable HTTP, 2025-era client** | its `Mcp-Session-Id` (a real session per client) | `tools/list_changed` on the session's event stream |
+| **Streamable HTTP, 2026-07-28 client** | stateless, so a scope: the authenticated client id, else the `x-mcp-gate-scope` header, else one shared scope | delivered to clients that opened a `subscriptions/listen` stream |
+
+The HTTP endpoint serves both eras on one URL. Without a scope header or authentication, all stateless clients share one set of enabled tools. That suits a single user on loopback. When several clients share an endpoint, give each its own `x-mcp-gate-scope` or put authentication in front.
+
+## Security
+
+- The HTTP endpoint binds to `127.0.0.1` and validates the `Host` and `Origin` headers (DNS-rebinding protection). Name extra hosts with `MCP_GATE_ALLOWED_HOSTS` when a reverse proxy fronts it.
+- `MCP_GATE_TOKEN` makes every request carry `Authorization: Bearer <token>` (compared in constant time).
+- The gate forwards a tool call only for a tool that is enabled in the caller's session and still allowed by policy.
+- Policy limits what a client can enable. It does not sandbox a downstream server: a tool you allow runs with that server's own permissions. Deny what you would not want a model to call.
+- Diagnostics go to stderr only, because on stdio stdout is the protocol channel. Configuration values are never logged.
+
+## What this does not do
+
+- **Routing is not understanding.** Lexical ranking finds tools whose words match the task. A paraphrase with no shared words matches nothing, and the answer is then "none", not a guess. Use `gate_search_tools` or enable by name.
+- **A client must honour `tools/list_changed`.** A client that ignores the notification keeps its old tool list until it re-lists on its own.
+- **Tool calls are passed through.** The gate does not validate arguments, it forwards them and returns the downstream result as is.
+- **No resources or prompts yet.** Only tools are proxied.
+
+## Development
+
+```bash
+npm test            # 42 tests; in-memory downstream servers, one real stdio process end to end
+npm run typecheck
+npm run dev -- --check
+```
+
+Built on the [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) 2.x (`@modelcontextprotocol/server`, `client`, `node`).
+
+| Path | Role |
+|---|---|
+| `src/gate.ts` | `Gate` (servers, catalog, policy) and `GateSession` (what one client may use; the decisions) |
+| `src/server.ts` | The MCP server a client talks to: `gate_*` tools plus the enabled tools |
+| `src/downstream.ts` | Connections to the downstream servers (stdio and Streamable HTTP) |
+| `src/stdio.ts`, `src/http.ts` | The two serving transports |
+| `src/policy.ts`, `src/catalog.ts`, `src/config.ts`, `src/glob.ts` | Policy, search ranking, configuration, wildcards |
+| `tests/` | Unit tests, gate behaviour, transports |
+
+## License
+
+MIT. See [LICENSE](LICENSE).

@@ -1,0 +1,26 @@
+{
+  "servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/folder"],
+      "policy": {
+        "deny": ["write_*", "edit_*", "move_*", "create_*"]
+      }
+    },
+    "github": {
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer ${GITHUB_MCP_TOKEN}" },
+      "policy": {
+        "allow": ["get_*", "list_*", "search_*", "create_issue"],
+        "confirm": ["create_issue"]
+      }
+    }
+  },
+  "gate": {
+    "maxEnabled": 20,
+    "idleTtlSec": 900,
+    "routeFloor": 1,
+    "routeTopK": 5,
+    "autoEnable": []
+  }
+}
