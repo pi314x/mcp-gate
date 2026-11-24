@@ -1,0 +1,9 @@
+{
+  "note": "A stack is the set of downstream servers a client would connect through the gate. Each entry names fixtures in bench/fixtures/. Add your own with scripts/capture-tools.ts and list them here.",
+  "default": "standard",
+  "stacks": [
+    { "id": "core", "label": "agent-orchestrator, core profile", "profile": "core", "fixtures": ["agent-orchestrator-core"] },
+    { "id": "standard", "label": "agent-orchestrator, standard profile (its default)", "profile": "standard", "fixtures": ["agent-orchestrator-standard"] },
+    { "id": "full", "label": "agent-orchestrator, full profile", "profile": "full", "fixtures": ["agent-orchestrator-full"] }
+  ]
+}

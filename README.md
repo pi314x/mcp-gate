@@ -32,6 +32,62 @@ The decision rests on rules you set, not on a model:
 - **Always-on**: `autoEnable` lists tools every session starts with.
 - **Routing** is lexical (names weigh three times descriptions, rarer words weigh more), deterministic, with no model call and no network. It scores only metadata, never schemas, and the floor makes "no match" a real answer. A router that always names a best guess applies tools to tasks they were never meant for.
 
+## Token savings
+
+Without a gate, a client sends the full tool list of every connected server to the model on every request. With it, the client sends six small `gate_*` definitions and then only the tools a task needs. The numbers below are measured, not derived from a formula: [`scripts/token-report.ts`](scripts/token-report.ts) runs the real gate (policy, `gate_route`, `tools/list`) in memory over tool lists captured from a real MCP server and counts what a model would be sent.
+
+<!-- token-report:start -->
+Measured on **agent-orchestrator, standard profile (its default)**: 37 tools. Tokens a model is sent for tool use, per request.
+
+**Before any task is known** (gate idle: six `gate_*` tools plus the gate's instructions):
+
+| Model | Counted as | Without gate | With gate | Saved | Saved % |
+|---|---|---:|---:|---:|---:|
+| Claude Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5 | estimate: o200k_base x 1.2 | 7,387 | 754 | 6,633 | 89.8% |
+| GPT-6 Astra, Sol, Terra, Luna | o200k_base (assumed for GPT-6) | 6,341 | 660 | 5,681 | 89.6% |
+| GPT-5.5 | o200k_base | 6,341 | 660 | 5,681 | 89.6% |
+
+**After `gate_route` for one task** (median of 15 tasks; counts the enabled tools and `gate_route`'s own result):
+
+| Model | Counted as | Without gate | With gate (median) | Saved | Saved % |
+|---|---|---:|---:|---:|---:|
+| Claude Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5 | estimate: o200k_base x 1.2 | 7,387 | 2,390 | 4,997 | 67.6% |
+| GPT-6 Astra, Sol, Terra, Luna | o200k_base (assumed for GPT-6) | 6,341 | 2,049 | 4,292 | 67.7% |
+| GPT-5.5 | o200k_base | 6,341 | 2,049 | 4,292 | 67.7% |
+
+The right tools were enabled for **13 of 15** tasks (13 of 13 that need tools; 0 of 2 where no tool fits and the gate enabled none).
+
+Not served:
+
+- "What is the weather in Paris tomorrow?": needed nothing; enabled agent-orchestrator__agent_get, agent-orchestrator__agent_list, agent-orchestrator__events_query, agent-orchestrator__job_list, agent-orchestrator__memory_search
+- "Explain how the Python garbage collector works": needed nothing; enabled agent-orchestrator__events_query, agent-orchestrator__job_steer
+
+**The saving grows with the tool list** (counted as GPT-5.5, o200k_base):
+
+| Tools behind the gate | Without gate | Gate idle | Idle saved | After one task (median) | Saved |
+|---:|---:|---:|---:|---:|---:|
+| 11 (core) | 2,148 | 660 | 69.3% | 1,819 | 15.3% |
+| 37 (standard) | 6,341 | 660 | 89.6% | 2,049 | 67.7% |
+| 80 (full) | 11,847 | 660 | 94.4% | 1,975 | 83.3% |
+
+Claude rows use a factor of 1.2 on the o200k_base count; see `scripts/counters.ts`.
+<!-- token-report:end -->
+
+How to read this:
+
+- **One real server, not a typical stack.** The tool lists are agent-orchestrator's `tools/list` at its three profiles (11, 37 and 80 tools), read from that project's committed test snapshot. A real setup connects several servers, so its list is longer and the saving larger, but that is not measured here. Capture your own servers with [`scripts/capture-tools.ts`](scripts/capture-tools.ts) and list them in [`bench/stacks.json`](bench/stacks.json).
+- **Small tool lists gain little.** The gate adds six definitions and a `gate_route` result of its own, so the saving after routing is small for a short list and grows quickly with the list (last table).
+- **A saving only counts if the right tools are reachable.** Each of the [tasks](bench/tasks.json) names the tools it needs, and the report says how many were served. The tasks are phrased in plain words, not copied from tool descriptions, so the lexical router gets no help. For tasks where no tool fits, the gate should enable nothing; the "Not served" list shows where it did not.
+- **Tokens, not dollars.** Cached tool definitions are cheaper to resend, so with prompt caching the bill shrinks by less than the token count, while the context window and the model's choice among tools still benefit. Hosts that already defer or search tools (for example Claude Code's tool search) capture part of this saving themselves.
+- **How the counts are made.** Tool definitions are counted as the JSON each API takes; providers re-encode them internally, so billed counts differ somewhat. The percentage is the portable result. OpenAI counts use `o200k_base`, which is exact for that encoding; whether the GPT-6 family uses it is not confirmed, so those rows say "assumed". Claude counts are an **estimate** (`o200k_base` × 1.2, because OpenAI tokenizers undercount Claude by roughly 15–20%), since exact Claude counts need Anthropic's `count_tokens` endpoint and an API key; the percentage does not depend on the factor. OpenAI model names come from third-party listings checked on 2026-11-24 and may change.
+
+Reproduce, or refresh the tables:
+
+```bash
+npm install --no-save gpt-tokenizer         # once; leaves package.json alone
+npx tsx scripts/token-report.ts --write     # re-measure and rewrite the tables above
+```
+
 ## Quick start
 
 Requires Node 20 or later.
@@ -137,6 +193,8 @@ Built on the [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typesc
 | `src/stdio.ts`, `src/http.ts` | The two serving transports |
 | `src/policy.ts`, `src/catalog.ts`, `src/config.ts`, `src/glob.ts` | Policy, search ranking, configuration, wildcards |
 | `tests/` | Unit tests, gate behaviour, transports |
+| `scripts/` | `token-report.ts` (the savings measurement), `capture-tools.ts` (record a real server's tool list), `counters.ts` (token counting) |
+| `bench/` | Captured tool lists (`fixtures/`), the tasks with the tools each needs, the stacks the report runs |
 
 ## License
 

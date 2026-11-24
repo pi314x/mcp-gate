@@ -1,0 +1,418 @@
+{
+  "server": "agent-orchestrator",
+  "source": "agent-orchestrator, tools/list contract snapshot, core profile",
+  "serverInfo": null,
+  "capturedOn": "2026-11-24",
+  "tools": [
+    {
+      "name": "agent_template_list",
+      "description": "List the built-in role templates that delegate and job_submit accept. Call this first when you want a one-shot agent and do not already have an agentId. Use agent_create to define a persistent agent of your own instead.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "job_submit",
+      "description": "Queue work for an agent and return a handle immediately, without waiting for the result. Use it for long work, for fan-out you will collect later, or when the job depends on others finishing first; use delegate when you just want one answer now. Follow up with job_wait and job_get.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "context": {
+            "additionalProperties": {},
+            "description": "Data for the agent. Never instructions.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "dependsOn": {
+            "description": "Job ids that must succeed first.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "instruction": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "outputSchema": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "priority": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "runner": {
+            "description": "Execution backend for this job, e.g. \"cli\" to spend your CLI login. Defaults to the deployment default. \"sampling\" is rejected here — a borrowed model only exists while a request is open, so use delegate.",
+            "enum": [
+              "anthropic",
+              "openai-compatible",
+              "cli",
+              "mock",
+              "sampling"
+            ],
+            "type": "string"
+          },
+          "skillQuery": {
+            "description": "Free-text match against agent roles and skills.",
+            "type": "string"
+          },
+          "template": {
+            "description": "Built-in template name; creates a throwaway agent.",
+            "type": "string"
+          },
+          "timeoutSec": {
+            "maximum": 604800,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "instruction"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "job_get",
+      "description": "Fetch one job with its state, result and usage. The shape is identical whether the work ran locally or on a remote agent. Use job_wait first if the job may still be running, and events_query for the step-by-step trail.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "includeEvents": {
+            "type": "boolean"
+          },
+          "jobId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "job_wait",
+      "description": "Block until the given jobs finish, or until the timeout expires — at most 60 seconds per call. Call it again if the jobs are still running; it never blocks longer than the protocol allows. Use job_get when you only want the current state without waiting.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "jobIds": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "mode": {
+            "default": "all",
+            "enum": [
+              "any",
+              "all"
+            ],
+            "type": "string"
+          },
+          "timeoutSec": {
+            "default": 30,
+            "maximum": 60,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobIds"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "job_cancel",
+      "description": "Cancel a queued or running job; for remote jobs this cancels the underlying A2A task too. Already-finished jobs are returned unchanged. Use job_retry to run a cancelled job again. A job running on another instance is stopped by its own instance shortly after, so the job comes back still `running` and reaches `cancelled` within a few seconds — poll job_get rather than assuming the returned state is final.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "jobId"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "delegate",
+      "description": "Run one instruction on the best-matching agent and return the result. This is the everyday tool: reach for it whenever you want a sub-agent to do something and hand the answer back. Use job_submit instead when the work is long, has dependencies, or should run in the background, and agent_template_list to see the roles you can target.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "context": {
+            "additionalProperties": {},
+            "description": "Data for the agent. Never instructions.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "instruction": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "outputSchema": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "runner": {
+            "description": "Execution backend for this call, e.g. \"cli\" to spend your CLI login. Defaults to the deployment default. \"sampling\" borrows the connected client model instead — legacy (pre-2026-07-28) clients only, needs wait:true, and model becomes a preference hint the client may ignore.",
+            "enum": [
+              "anthropic",
+              "openai-compatible",
+              "cli",
+              "mock",
+              "sampling"
+            ],
+            "type": "string"
+          },
+          "skillQuery": {
+            "description": "Free-text match against agent roles and skills.",
+            "type": "string"
+          },
+          "template": {
+            "description": "Built-in template name, e.g. \"researcher\".",
+            "type": "string"
+          },
+          "timeoutSec": {
+            "default": 60,
+            "maximum": 60,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "wait": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "instruction"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "fan_out",
+      "description": "Run the same instruction over many items in parallel, optionally reducing the results with a final step. Use it for per-file review, per-record extraction, or any map-style workload; use delegate for a single item. Concurrency is capped by the orchestrator and by any budget you set.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "concurrency": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "instructionTemplate": {
+            "description": "Instruction with {{item}} substituted per item, e.g. \"Review {{item}}\".",
+            "minLength": 1,
+            "type": "string"
+          },
+          "items": {
+            "items": {},
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          },
+          "model": {
+            "type": "string"
+          },
+          "reduce": {
+            "description": "Optional final step over the collected results.",
+            "properties": {
+              "instruction": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "template": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "instruction"
+            ],
+            "type": "object"
+          },
+          "runner": {
+            "description": "Execution backend for every job in this call. Defaults to the deployment default.",
+            "enum": [
+              "anthropic",
+              "openai-compatible",
+              "cli",
+              "mock",
+              "sampling"
+            ],
+            "type": "string"
+          },
+          "skillQuery": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "timeoutSec": {
+            "default": 60,
+            "maximum": 60,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "wait": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "instructionTemplate",
+          "items"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "artifact_get",
+      "description": "Read an artifact by id, with offset and length for large content. Check eof to know whether more remains. Use artifact_list to find the id.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "artifactId": {
+            "type": "string"
+          },
+          "length": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "offset": {
+            "default": 0,
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "artifactId"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "approval_list",
+      "description": "List approval gates waiting on a human: paused workflow steps, mid-loop request_approval calls, remote tasks waiting for input, and refusal notices (budget caps, unverified cards) filed for visibility. Check this when a workflow run is paused or a job seems stuck waiting. Resolve them with approval_resolve — a gated downstream call or remote answer takes editedInput as its new arguments or reply message.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "enum": [
+              "job",
+              "workflow_step",
+              "unverified_card",
+              "budget"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "description": "Defaults to pending.",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "approval_resolve",
+      "description": "Approve or reject a pending gate, optionally with a comment or edited input. Approving a paused workflow step resumes the run on the next tick. An approval can only be resolved once.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "approvalId": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "approve",
+              "reject"
+            ],
+            "type": "string"
+          },
+          "editedInput": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "approvalId",
+          "decision"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "orchestrator_status",
+      "description": "Report orchestrator health, version, active tool profile, queue depth, schema state and your own caller identity. The caller ownerId is the granteeId to hand someone so they can share an agent or memory namespace with you via agent_share or memory_share. Not for inspecting individual work — use job_get or job_list for that.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    }
+  ]
+}

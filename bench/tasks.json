@@ -1,0 +1,23 @@
+{
+  "note": "Each task is phrased the way a person or a model would ask for it, not copied from tool descriptions: the router is lexical, so borrowed wording would flatter it. `expect` lists tools (unqualified) that must be enabled for the task to count as served. `minProfile` is the smallest agent-orchestrator profile that offers them. `expect: []` marks a task no tool fits: the right outcome is that the gate enables nothing.",
+  "server": "agent-orchestrator",
+  "tasks": [
+    { "task": "Run this instruction on a suitable agent and give me the result", "expect": ["delegate"], "minProfile": "core" },
+    { "task": "Queue a long job and check on its state later", "expect": ["job_submit", "job_get"], "minProfile": "core" },
+    { "task": "Wait until my jobs are finished", "expect": ["job_wait"], "minProfile": "core" },
+    { "task": "Cancel the job that is still running", "expect": ["job_cancel"], "minProfile": "core" },
+    { "task": "Apply the same instruction to each of these 50 items in parallel", "expect": ["fan_out"], "minProfile": "core" },
+    { "task": "Show what is waiting for a human to approve, then approve one", "expect": ["approval_list", "approval_resolve"], "minProfile": "core" },
+    { "task": "Is the orchestrator healthy and which tool profile is active?", "expect": ["orchestrator_status"], "minProfile": "core" },
+    { "task": "Read the artifact that the last job produced", "expect": ["artifact_get"], "minProfile": "core" },
+    { "task": "Define a workflow with several steps and start it", "expect": ["workflow_define", "workflow_start"], "minProfile": "standard" },
+    { "task": "Save a note to shared memory and search it again later", "expect": ["memory_write", "memory_search"], "minProfile": "standard" },
+    { "task": "How many tokens did my agents use this week?", "expect": ["usage_report"], "minProfile": "standard" },
+    { "task": "Create a persistent agent of my own", "expect": ["agent_create"], "minProfile": "standard" },
+    { "task": "Preview when my schedule would fire next", "expect": ["schedule_preview"], "minProfile": "standard" },
+    { "task": "Register an external tool server", "expect": ["toolserver_register"], "minProfile": "full" },
+    { "task": "Set a spending budget for my agents", "expect": ["budget_set"], "minProfile": "full" },
+    { "task": "What is the weather in Paris tomorrow?", "expect": [], "minProfile": "core" },
+    { "task": "Explain how the Python garbage collector works", "expect": [], "minProfile": "core" }
+  ]
+}
