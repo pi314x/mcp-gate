@@ -66,24 +66,24 @@ Measured on **agent-orchestrator, standard profile (its default)**: 37 tools. To
 
 | Model | Counted as | Without gate | With gate (median) | Saved | Saved % |
 |---|---|---:|---:|---:|---:|
-| Claude Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5 | estimate: o200k_base x 1.2 | 7,387 | 2,390 | 4,997 | 67.6% |
-| GPT-6 Astra, Sol, Terra, Luna | o200k_base (assumed for GPT-6) | 6,341 | 2,049 | 4,292 | 67.7% |
-| GPT-5.5 | o200k_base | 6,341 | 2,049 | 4,292 | 67.7% |
+| Claude Fable 5.2, Opus 5.5, Sonnet 5.5, Haiku 5.5 | estimate: o200k_base x 1.2 | 7,387 | 1,810 | 5,577 | 75.5% |
+| GPT-6 Astra, Sol, Terra, Luna | o200k_base (assumed for GPT-6) | 6,341 | 1,550 | 4,791 | 75.6% |
+| GPT-5.5 | o200k_base | 6,341 | 1,550 | 4,791 | 75.6% |
 
-The right tools were enabled for **13 of 15** tasks (13 of 13 that need tools; 0 of 2 where no tool fits and the gate enabled none).
+The right tools were enabled for **13 of 15** tasks (11 of 13 that need tools; 2 of 2 where no tool fits and the gate enabled none).
 
 Not served:
 
-- "What is the weather in Paris tomorrow?": needed nothing; enabled agent-orchestrator__agent_get, agent-orchestrator__agent_list, agent-orchestrator__events_query, agent-orchestrator__job_list, agent-orchestrator__memory_search
-- "Explain how the Python garbage collector works": needed nothing; enabled agent-orchestrator__events_query, agent-orchestrator__job_steer
+- "Show what is waiting for a human to approve, then approve one": needed agent-orchestrator__approval_list, agent-orchestrator__approval_resolve; enabled agent-orchestrator__approval_list
+- "Save a note to shared memory and search it again later": needed agent-orchestrator__memory_write, agent-orchestrator__memory_search; enabled agent-orchestrator__memory_search, agent-orchestrator__memory_read
 
 **The saving grows with the tool list** (counted as GPT-5.5, o200k_base):
 
 | Tools behind the gate | Without gate | Gate idle | Idle saved | After one task (median) | Saved |
 |---:|---:|---:|---:|---:|---:|
-| 11 (core) | 2,148 | 660 | 69.3% | 1,819 | 15.3% |
-| 37 (standard) | 6,341 | 660 | 89.6% | 2,049 | 67.7% |
-| 80 (full) | 11,847 | 660 | 94.4% | 1,975 | 83.3% |
+| 11 (core) | 2,148 | 660 | 69.3% | 1,144 | 46.7% |
+| 37 (standard) | 6,341 | 660 | 89.6% | 1,550 | 75.6% |
+| 80 (full) | 11,847 | 660 | 94.4% | 1,796 | 84.8% |
 
 Claude rows use a factor of 1.2 on the o200k_base count; see `scripts/counters.ts`.
 <!-- token-report:end -->
