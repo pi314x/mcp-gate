@@ -32,6 +32,21 @@ The decision rests on rules you set, not on a model:
 - **Always-on**: `autoEnable` lists tools every session starts with.
 - **Routing** is lexical (names weigh three times descriptions, rarer words weigh more), deterministic, with no model call and no network. It scores only metadata, never schemas, and the floor makes "no match" a real answer. A router that always names a best guess applies tools to tasks they were never meant for.
 
+### Saying "nothing fits"
+
+A score floor alone does not make "no match" a real answer: "Cancel my gym membership" shares the word *cancel* with `job_cancel` and scores well above any sensible floor. So `gate_route` also asks for **corroboration**. A tool counts only when it shares at least `routeMinMatched` distinct words with the task (2 by default; all of them, for a one-word task) and at least `routeMinCoverage` of the task's distinct words (0.34). Words that no tool knows count against the task, because they are the evidence that it is about something else. Question words and pronouns (*what, how, my, which*) are stop words.
+
+Measured with [`npm run abstain`](scripts/abstain.ts), which runs the real `GateSession.route` over [`bench/abstain.json`](bench/abstain.json): 24 tasks that need an agent-orchestrator tool and 30 that need none, many of them traps that share a word with the catalog (*schedule a dentist, plan a trip, run a marathon*).
+
+| Tasks | Rule | Serves the tasks that need a tool | Abstains on tasks that need none |
+|---|---|---:|---:|
+| 54 used to choose the rule | one shared word is enough | 21 of 24 (88%) | 4 of 30 (13%) |
+| | corroboration (shipped defaults) | 19 of 24 (79%) | 29 of 30 (97%) |
+| 26 written afterwards, scored once | one shared word is enough | 12 of 12 (100%) | 2 of 14 (14%) |
+| | corroboration (shipped defaults) | 9 of 12 (75%) | 14 of 14 (100%) |
+
+Read it as a trade, not a free win: between a fifth and a quarter of the tasks that do need a tool are not served by `gate_route` (before: none to an eighth), and the model has to fall back on `gate_search_tools` and `gate_enable_tools`. In return, almost every task that needs no tool is no longer given one. The three misses on the later set are a long task with few shared words ("process each of these 20 documents in parallel with the same prompt"), one whose other words the catalog does not know ("how many tokens did each agent burn this week"), and one where the task has the wrong word form and a synonym ("approvals" against `approval_list`, "person" against *human*). The thresholds sit on an edge: two shared words out of six pass at `routeMinCoverage` 0.33 and fail at 0.34. The first rule picked on half of the tasks was too strict on the other half, which is why the final set exists. This is one server's tool list and 80 tasks; check your own catalog before trusting the defaults, and lower `routeMinCoverage` if `gate_route` abstains too often.
+
 ## Token savings
 
 Without a gate, a client sends the full tool list of every connected server to the model on every request. With it, the client sends six small `gate_*` definitions and then only the tools a task needs. The numbers below are measured, not derived from a formula: [`scripts/token-report.ts`](scripts/token-report.ts) runs the real gate (policy, `gate_route`, `tools/list`) in memory over tool lists captured from a real MCP server and counts what a model would be sent.
@@ -88,6 +103,15 @@ npm install --no-save gpt-tokenizer         # once; leaves package.json alone
 npx tsx scripts/token-report.ts --write     # re-measure and rewrite the tables above
 ```
 
+## Sharing the accounting (optional)
+
+Set `CTX_LEDGER_FILE=<path>` and the gate appends one line per event to a [ctx-ledger](https://github.com/pi314x/ctx-ledger) file, so its saving can be summed with that of [lean-context](https://github.com/pi314x/lean-context) and the others:
+
+- `tools_list`, once per listing: `sent` is the gate's own tools, the enabled ones and its instructions; `baseline` is every tool the policy lets through, which is what a client would be sent without a gate. Tools the policy denies are left out of the baseline, so the saving is not inflated by tools nobody could use. It is one listing, not one model request: a client that resends the list pays that amount on each request until it changes.
+- `route`, once per `gate_route` call: the size of the answer, with a baseline of `0`, because the answer is extra cost on top of the listing.
+
+Lines hold counts and ids only, never a task or a tool name, and a ledger that cannot be written never fails a request. Tokens are counted with the same `heuristic-v1` estimate as lean-context, not with a model tokenizer. It is off unless the file is set. `src/ledger.ts` and `src/ledger-tokens.ts` are byte-identical copies from ctx-ledger's `canonical/`, and its tests fail if they drift.
+
 ## Quick start
 
 Requires Node 20 or later.
@@ -138,6 +162,8 @@ One JSON file (`--config`, `MCP_GATE_CONFIG`, or `./mcp-gate.config.json`). See 
     "maxEnabled": 25,     // most tools enabled at once, per session
     "idleTtlSec": 900,    // switch off tools unused this long (0 = never)
     "routeFloor": 1,      // minimum score for gate_route to enable a tool
+    "routeMinMatched": 2, // distinct words a tool must share with the task (all of them, for a shorter task)
+    "routeMinCoverage": 0.34, // and this fraction of the task's distinct words; unknown words count against it
     "routeTopK": 5,       // most tools gate_route enables for one task
     "autoEnable": []      // tools every session starts with, e.g. ["filesystem__read_file"]
   }

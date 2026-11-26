@@ -1,0 +1,479 @@
+{
+  "note": "Abstention benchmark. `expect: []` marks a task no tool of the standard profile fits: the right outcome is that the gate enables nothing. `tuning` tasks were used to choose the routing rule (first as a dev/held-out pair, then together, because the first rule overfit its dev half). `final` tasks were written afterwards and scored once: they are the number to quote. Negatives include deliberate traps that share a word with the catalog (schedule, cancel, plan, report, list, search, memory). Positives are phrased like a person, not copied from descriptions. Run with `npm run abstain`.",
+  "server": "agent-orchestrator",
+  "fixture": "agent-orchestrator-standard",
+  "tasks": [
+    {
+      "task": "Hand this question to whichever agent suits it best",
+      "expect": [
+        "delegate"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Retry the job that failed overnight",
+      "expect": [
+        "job_retry"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Tell the running job to focus on the billing module instead",
+      "expect": [
+        "job_steer"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "What jobs are still queued right now?",
+      "expect": [
+        "job_list"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Look at the details of one particular agent",
+      "expect": [
+        "agent_get"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Which agents can I send work to?",
+      "expect": [
+        "agent_list"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Pause the workflow run and resume it after lunch",
+      "expect": [
+        "workflow_run_control"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Show me the steps and outputs of last night's workflow run",
+      "expect": [
+        "workflow_run_get"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Turn this goal into a draft multi-step workflow",
+      "expect": [
+        "plan_create"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Export the finished run as a markdown report",
+      "expect": [
+        "workflow_export"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Keep this value on the shared blackboard for the next jobs",
+      "expect": [
+        "memory_write"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Find what earlier jobs wrote about the invoice format",
+      "expect": [
+        "memory_search"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Upload a big output as an artifact and hand back an id",
+      "expect": [
+        "artifact_put"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "List all artifacts produced by a given job",
+      "expect": [
+        "artifact_list"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Reject the pending gate and add a comment",
+      "expect": [
+        "approval_resolve"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Give me the audit trail of events for this job",
+      "expect": [
+        "events_query"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Show a timing tree of a workflow run",
+      "expect": [
+        "trace_get"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "How much did each model cost me this month?",
+      "expect": [
+        "usage_report"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Which runners are usable and which lack credentials?",
+      "expect": [
+        "runner_list"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "List my cron schedules and when they fire next",
+      "expect": [
+        "schedule_list"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Which role templates can I give to a job?",
+      "expect": [
+        "agent_template_list"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Fetch the result and usage of one job",
+      "expect": [
+        "job_get"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "What are the grant presets an admin made?",
+      "expect": [
+        "grant_preset_list"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "Read the value stored under a namespace and key",
+      "expect": [
+        "memory_read"
+      ],
+      "split": "tuning"
+    },
+    {
+      "task": "What is the weather in Berlin this weekend?",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Explain the difference between TCP and UDP",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Schedule a dentist appointment for Friday",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Cancel my gym membership",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Plan a three day trip to Lisbon",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Run a marathon next month: how should I train?",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Summarize this article for my blog",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Write a Python script that renames files in a folder",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Create a birthday cake recipe without eggs",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "What is 17 times 23?",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Recommend a good science fiction novel",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Draft an email to my landlord about the heating",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Convert 30 degrees Celsius to Fahrenheit",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Tell me a joke about programmers",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Show me how to fix a flat bike tire",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "How long should I boil an egg?",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Help me write a cover letter for a design job",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Which programming language should I learn first?",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "What happened in 1969?",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Create a logo for my bakery",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Define the word ephemeral",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "List the planets of the solar system",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Wait for me at the station at six",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Write a report on the causes of the First World War",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Search the web for cheap flights to Rome",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Read me a bedtime story about a dragon",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Store my winter clothes in the attic",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Translate this paragraph into French",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "How do I reverse a linked list?",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Check the status of my parcel delivery",
+      "expect": [],
+      "split": "tuning"
+    },
+    {
+      "task": "Run this on the best agent and give me the answer back",
+      "expect": [
+        "delegate"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Cancel the job that's stuck",
+      "expect": [
+        "job_cancel"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Block until both of my jobs are done",
+      "expect": [
+        "job_wait"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Process each of these 20 documents in parallel with the same prompt",
+      "expect": [
+        "fan_out"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Create a named workflow with several dependent steps",
+      "expect": [
+        "workflow_define"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Which workflows have I defined so far?",
+      "expect": [
+        "workflow_list"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Show the pending approvals waiting for a person",
+      "expect": [
+        "approval_list"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "What is the queue depth and health of the orchestrator?",
+      "expect": [
+        "orchestrator_status"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Retrieve an artifact by its id",
+      "expect": [
+        "artifact_get"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Preview the next fire times of this cron expression",
+      "expect": [
+        "schedule_preview"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Define a persistent agent that reviews pull requests",
+      "expect": [
+        "agent_create"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "How many tokens did each agent burn this week?",
+      "expect": [
+        "usage_report"
+      ],
+      "split": "final"
+    },
+    {
+      "task": "Book me a table for two on Saturday evening",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "What's the capital of Australia?",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "Rewrite this paragraph to sound more formal",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "Explain how a transformer neural network works",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "Suggest a name for my new puppy",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "Create a playlist for a long road trip",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "Show me the history of the Roman empire",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "How do I cancel a subscription on my phone?",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "Find a good dentist near me",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "List five healthy breakfast ideas",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "Run a quick sanity check on my math homework",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "Remind me to call mom tomorrow",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "What is the status of the Mars rover?",
+      "expect": [],
+      "split": "final"
+    },
+    {
+      "task": "Compare the memory of the iPhone and the Pixel",
+      "expect": [],
+      "split": "final"
+    }
+  ]
+}

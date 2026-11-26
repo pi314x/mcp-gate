@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { qualify, rank, splitQualified, tokenize, type CatalogTool } from '../src/catalog.js';
+import { corroborated, qualify, rank, splitQualified, tokenize, type CatalogTool } from '../src/catalog.js';
 import { interpolateEnv, parseConfig } from '../src/config.js';
 import { globToRegExp, matchesAny } from '../src/glob.js';
 import { decide, OPEN_POLICY } from '../src/policy.js';
@@ -65,13 +65,57 @@ describe('search ranking', () => {
     expect(rank(tools, '')).toEqual([]);
     expect(rank([], 'file')).toEqual([]);
   });
+
+  it('drops question words and pronouns, which separate nothing', () => {
+    expect(tokenize('what is my file and how can I read it')).toEqual(['file', 'read']);
+  });
+});
+
+describe('corroboration', () => {
+  const tools = [
+    tool('files', 'read_file', 'Read the contents of a file from disk'),
+    tool('calendar', 'create_event', 'Create a calendar event with a title and a time')
+  ];
+  const top = (query: string) => rank(tools, query)[0]!;
+
+  it('counts the distinct words a tool shares with the task, and every word of the task', () => {
+    expect(top('read a file')).toMatchObject({ matched: 2, total: 2 });
+    expect(top('read a file quickly')).toMatchObject({ matched: 2, total: 3 });
+  });
+
+  it('does not accept one shared word among several: it is how an unrelated task reaches a tool', () => {
+    const entry = top('create a birthday cake recipe');
+    expect(entry.tool.tool).toBe('create_event');
+    expect(entry).toMatchObject({ matched: 1, total: 4 });
+    expect(corroborated(entry, 2, 0.34)).toBe(false);
+    expect(corroborated(entry, 1, 0)).toBe(true);
+  });
+
+  it('judges a task of one word on that word', () => {
+    expect(corroborated(top('calendar'), 2, 0.34)).toBe(true);
+  });
+
+  it('enforces coverage on its own: two shared words are not enough when the rest of the task is unknown', () => {
+    const entry = top('read file today sometime later maybe');
+    expect(entry).toMatchObject({ matched: 2, total: 6 });
+    expect(corroborated(entry, 2, 0.34)).toBe(false);
+    expect(corroborated(entry, 2, 0.3)).toBe(true);
+  });
 });
 
 describe('configuration', () => {
   it('fills in defaults', () => {
     const config = parseConfig({ servers: { files: { command: 'node' } } });
     expect(config.servers.files).toMatchObject({ args: [], policy: { allow: ['*'], deny: [], confirm: [] } });
-    expect(config.gate).toEqual({ maxEnabled: 25, idleTtlSec: 0, routeFloor: 1, routeTopK: 5, autoEnable: [] });
+    expect(config.gate).toEqual({
+      maxEnabled: 25,
+      idleTtlSec: 0,
+      routeFloor: 1,
+      routeMinMatched: 2,
+      routeMinCoverage: 0.34,
+      routeTopK: 5,
+      autoEnable: []
+    });
   });
 
   it('rejects a server name that would break the tool prefix', () => {

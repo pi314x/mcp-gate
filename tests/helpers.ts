@@ -4,6 +4,7 @@ import * as z from 'zod/v4';
 import { parseConfig, type GateConfig } from '../src/config.js';
 import type { Connector } from '../src/downstream.js';
 import { Gate, type GateSession } from '../src/gate.js';
+import type { LedgerRecorder } from '../src/ledger.js';
 import { createGateServer } from '../src/server.js';
 
 export interface FakeTool {
@@ -63,9 +64,10 @@ export async function rig(options: {
   servers?: Record<string, unknown>;
   gate?: Record<string, unknown>;
   downstreams?: Record<string, ReturnType<typeof fakeServer>['connector']>;
+  ledger?: LedgerRecorder;
 } = {}): Promise<Rig> {
   const downstreams = options.downstreams ?? { files: fakeServer(FILES).connector, calendar: fakeServer(CALENDAR).connector };
-  const gate = new Gate(configOf(options), downstreams);
+  const gate = new Gate(configOf(options), downstreams, undefined, options.ledger);
   await gate.start();
 
   const session = gate.createSession();

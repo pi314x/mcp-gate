@@ -34,12 +34,16 @@ const gateSchema = z
     idleTtlSec: z.number().min(0).default(0),
     /** A tool must score at least this to be enabled by `gate_route`. Below it, nothing is enabled. */
     routeFloor: z.number().min(0).default(1),
+    /** A tool must also share at least this many distinct words with the task (all of them, for a shorter task). */
+    routeMinMatched: z.number().int().min(1).default(2),
+    /** ... and at least this fraction of the task's distinct words. Words no tool knows count against it. */
+    routeMinCoverage: z.number().min(0).max(1).default(0.34),
     /** Most tools `gate_route` enables for one task. */
     routeTopK: z.number().int().min(1).max(50).default(5),
     /** Qualified names or patterns enabled in every new session (`server__tool`, `*` wildcard). */
     autoEnable: z.array(z.string()).default([])
   })
-  .default({ maxEnabled: 25, idleTtlSec: 0, routeFloor: 1, routeTopK: 5, autoEnable: [] });
+  .default({ maxEnabled: 25, idleTtlSec: 0, routeFloor: 1, routeMinMatched: 2, routeMinCoverage: 0.34, routeTopK: 5, autoEnable: [] });
 
 export const configSchema = z.object({
   servers: z

@@ -20,7 +20,12 @@ export function splitQualified(qualified: string): { server: string; tool: strin
   return { server: qualified.slice(0, at), tool: qualified.slice(at + SEPARATOR.length) };
 }
 
-const STOP_WORDS = new Set(['a', 'an', 'and', 'the', 'to', 'of', 'for', 'in', 'on', 'with', 'is', 'it', 'this', 'that', 'or', 'by']);
+/** Question words, pronouns and auxiliaries: they appear in nearly every task and tool description and separate nothing. */
+const STOP_WORDS = new Set(
+  `a an and the to of for in on with is it this that or by at from about
+   what how which who why when my me i you your we our can could would should do does did are was were be been will please
+   one some any there their them these those`.split(/\s+/)
+);
 
 export function tokenize(text: string): string[] {
   return text
@@ -33,6 +38,20 @@ export function tokenize(text: string): string[] {
 export interface Scored {
   tool: CatalogTool;
   score: number;
+  /** Distinct query words found in this tool's name or description. */
+  matched: number;
+  /** Distinct words of the query. Words no tool knows count here: they are the evidence that a task is about something else. */
+  total: number;
+}
+
+/**
+ * Whether a score is backed by enough of the task. One shared word is how "Cancel my gym membership" reaches
+ * `job_cancel`, and a task that is mostly words no tool knows is about something else. A tool counts only when at
+ * least `minMatched` of the task's words (or all of them, for a shorter task) and at least `minCoverage` of them
+ * are found in it.
+ */
+export function corroborated(entry: Scored, minMatched: number, minCoverage: number): boolean {
+  return entry.matched >= Math.min(minMatched, entry.total) && entry.matched / entry.total >= minCoverage;
 }
 
 /**
@@ -58,12 +77,16 @@ export function rank(tools: readonly CatalogTool[], query: string): Scored[] {
   return docs
     .map((doc) => {
       let score = 0;
+      let matched = 0;
       for (const word of words) {
         const weight = idf.get(word) ?? 0;
-        if (doc.name.has(word)) score += 3 * weight;
-        if (doc.description.has(word)) score += weight;
+        const inName = doc.name.has(word);
+        const inDescription = doc.description.has(word);
+        if (inName) score += 3 * weight;
+        if (inDescription) score += weight;
+        if (inName || inDescription) matched += 1;
       }
-      return { tool: doc.tool, score };
+      return { tool: doc.tool, score, matched, total: words.length };
     })
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score || a.tool.qualified.localeCompare(b.tool.qualified));

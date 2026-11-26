@@ -164,6 +164,20 @@ describe('the gate deciding', () => {
     expect((await toolNames(r.client)).length).toBe(GATE_TOOLS.length);
   });
 
+  it('does not enable a tool because one word of the task appears in it', async () => {
+    const task = 'create a birthday cake recipe';
+    const r = await start();
+    const report = jsonOf<{ matched: unknown[]; enable?: unknown }>(await r.client.callTool({ name: 'gate_route', arguments: { task } }));
+    expect(report.matched).toEqual([]);
+    expect(report.enable).toBeUndefined();
+    expect((await toolNames(r.client)).length).toBe(GATE_TOOLS.length);
+    await r.close();
+
+    const lenient = await start({ gate: { routeMinMatched: 1, routeMinCoverage: 0 } });
+    const loose = jsonOf<{ matched: { name: string }[] }>(await lenient.client.callTool({ name: 'gate_route', arguments: { task } }));
+    expect(loose.matched[0]?.name).toBe('calendar__create_event');
+  });
+
   it('applies the score floor: a weak match is not enough to enable anything', async () => {
     const strict = await start({ gate: { routeFloor: 50 } });
     const none = jsonOf<{ matched: unknown[]; enable?: unknown }>(

@@ -2,6 +2,8 @@
 import { loadConfig } from './config.js';
 import { Gate } from './gate.js';
 import { serveOverHttp } from './http.js';
+import { ledgerFromEnv } from './ledger.js';
+import { LEDGER_COUNTER } from './ledger-tokens.js';
 import { messageOf, stderrLog } from './log.js';
 import { serveOverStdio } from './stdio.js';
 import { NAME, VERSION } from './version.js';
@@ -86,7 +88,7 @@ async function main(): Promise<number> {
   }
 
   const config = await loadConfig(args.config);
-  const gate = new Gate(config, {}, stderrLog);
+  const gate = new Gate(config, {}, stderrLog, ledgerFromEnv('gate', LEDGER_COUNTER));
   await gate.start();
 
   if (args.check) {

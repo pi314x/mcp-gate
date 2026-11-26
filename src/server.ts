@@ -1,5 +1,7 @@
 import { Server, type CallToolResult, type Tool } from '@modelcontextprotocol/server';
+import type { CatalogTool } from './catalog.js';
 import type { Gate, GateSession } from './gate.js';
+import { countTokens } from './ledger-tokens.js';
 import { messageOf } from './log.js';
 import { NAME, VERSION } from './version.js';
 
@@ -76,6 +78,33 @@ const META_TOOLS: Tool[] = [
   }
 ];
 
+const toolDefinition = (tool: CatalogTool): Tool => ({
+  name: tool.qualified,
+  description: tool.description,
+  inputSchema: tool.inputSchema as Tool['inputSchema'],
+  ...(tool.outputSchema !== undefined && { outputSchema: tool.outputSchema as Tool['outputSchema'] }),
+  ...(tool.annotations !== undefined && { annotations: tool.annotations as Tool['annotations'] })
+});
+
+/**
+ * One `tools_list` event per listing: what the gate sends (its own tools, the enabled ones and its instructions)
+ * against every tool the policy lets through, which is what a client would be sent without a gate. Denied tools stay
+ * out of the baseline, so the saving is not inflated by tools the client could never have used.
+ */
+function recordListing(gate: Gate, listed: Tool[]): void {
+  if (gate.ledger === undefined) return;
+  const offered = gate
+    .catalog()
+    .filter((tool) => gate.decisionFor(tool).verdict !== 'deny')
+    .map(toolDefinition);
+  gate.ledger.record({
+    kind: 'tools_list',
+    sent: countTokens(JSON.stringify(listed)) + countTokens(INSTRUCTIONS),
+    baseline: countTokens(JSON.stringify(offered)),
+    meta: { enabled: listed.length - META_TOOLS.length, offered: offered.length }
+  });
+}
+
 const json = (value: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] });
 const failure = (message: string): CallToolResult => ({ content: [{ type: 'text', text: message }], isError: true });
 
@@ -100,11 +129,19 @@ function metaCall(gate: Gate, session: GateSession, name: string, args: Record<s
         enable: args.enable !== false,
         ...(typeof args.limit === 'number' && { limit: args.limit })
       });
-      return json({
+      const result = json({
         matched: report.matched,
         ...(report.enable !== undefined && { enable: report.enable }),
         ...(report.matched.length === 0 && { hint: 'No tool fits this task. Use the tools you already have.' })
       });
+      // Baseline 0: the answer is added cost on top of the listing, whose baseline already covers every tool.
+      gate.ledger?.record({
+        kind: 'route',
+        sent: countTokens(JSON.stringify(result.content)),
+        baseline: 0,
+        meta: { matched: report.matched.length, enabled: report.enable?.enabled.length ?? 0 }
+      });
+      return result;
     }
     case 'gate_enable_tools': {
       const tools = strings(args.tools);
@@ -134,20 +171,11 @@ export function createGateServer(gate: Gate, session: GateSession, options: { ow
     { capabilities: { tools: { listChanged: true } }, instructions: INSTRUCTIONS }
   );
 
-  server.setRequestHandler('tools/list', () => ({
-    tools: [
-      ...META_TOOLS,
-      ...session.enabledTools().map(
-        (tool): Tool => ({
-          name: tool.qualified,
-          description: tool.description,
-          inputSchema: tool.inputSchema as Tool['inputSchema'],
-          ...(tool.outputSchema !== undefined && { outputSchema: tool.outputSchema as Tool['outputSchema'] }),
-          ...(tool.annotations !== undefined && { annotations: tool.annotations as Tool['annotations'] })
-        })
-      )
-    ]
-  }));
+  server.setRequestHandler('tools/list', () => {
+    const tools = [...META_TOOLS, ...session.enabledTools().map(toolDefinition)];
+    recordListing(gate, tools);
+    return { tools };
+  });
 
   server.setRequestHandler('tools/call', async (request, ctx) => {
     const { name } = request.params;

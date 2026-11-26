@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
@@ -165,5 +165,35 @@ describe('stdio, end to end with a real downstream process', () => {
     );
     expect(denied.denied.map((entry) => entry.name)).toEqual(['text__delete_everything']);
     expect(await toolNames(client)).not.toContain('text__delete_everything');
+  }, 60_000);
+
+  it('writes its token ledger when the environment of the real process names a file', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'mcp-gate-ledger-'));
+    const configPath = join(directory, 'config.json');
+    const ledger = join(directory, 'ledger.jsonl');
+    await writeFile(
+      configPath,
+      JSON.stringify({ servers: { text: { command: process.execPath, args: ['--import', 'tsx', join(process.cwd(), 'tests/fixtures/downstream.ts')] } } })
+    );
+
+    const client = new Client({ name: 'test', version: '0.0.0' });
+    await client.connect(
+      new StdioClientTransport({
+        command: process.execPath,
+        args: ['--import', 'tsx', join(process.cwd(), 'src/index.ts'), '--config', configPath],
+        env: { CTX_LEDGER_FILE: ledger, CTX_LEDGER_SESSION: 'e2e-session' },
+        stderr: 'pipe'
+      })
+    );
+    cleanups.push(() => client.close());
+
+    await toolNames(client);
+    await client.callTool({ name: 'gate_route', arguments: { task: 'turn some text into capital letters' } });
+
+    const lines = (await readFile(ledger, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(lines.map((line) => line.kind)).toEqual(['tools_list', 'route']);
+    expect(lines[0]).toMatchObject({ v: 1, session: 'e2e-session', layer: 'gate', counter: 'heuristic-v1' });
+    expect(lines[0]!.baseline).toBeGreaterThan(0);
+    expect(lines[1]!.baseline).toBe(0);
   }, 60_000);
 });

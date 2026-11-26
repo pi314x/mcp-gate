@@ -1,8 +1,9 @@
 import type { CallToolResult } from '@modelcontextprotocol/client';
-import { rank, splitQualified, type CatalogTool } from './catalog.js';
+import { corroborated, rank, splitQualified, type CatalogTool } from './catalog.js';
 import type { GateConfig } from './config.js';
 import { Downstream, connectorFor, type Connector, type DownstreamStatus } from './downstream.js';
 import { globToRegExp } from './glob.js';
+import type { LedgerRecorder } from './ledger.js';
 import { messageOf, silentLog, type Logger } from './log.js';
 import { decide, type Decision } from './policy.js';
 
@@ -50,7 +51,8 @@ export class Gate {
   constructor(
     readonly config: GateConfig,
     connectors: Record<string, Connector> = {},
-    readonly log: Logger = silentLog
+    readonly log: Logger = silentLog,
+    readonly ledger?: LedgerRecorder
   ) {
     for (const [name, server] of Object.entries(config.servers)) {
       this.downstreams.set(
@@ -242,13 +244,13 @@ export class GateSession {
    * that always names a best guess applies tools to tasks they were never meant for.
    */
   route(task: string, options: { enable: boolean; limit?: number }): RouteReport {
-    const { routeFloor, routeTopK } = this.gate.config.gate;
+    const { routeFloor, routeMinMatched, routeMinCoverage, routeTopK } = this.gate.config.gate;
     const limit = Math.min(options.limit ?? routeTopK, routeTopK);
     const matched = rank(
       this.candidates().map((candidate) => candidate.tool),
       task
     )
-      .filter((entry) => entry.score >= routeFloor)
+      .filter((entry) => entry.score >= routeFloor && corroborated(entry, routeMinMatched, routeMinCoverage))
       .slice(0, limit);
     const report: RouteReport = {
       matched: matched.map(({ tool, score }) => ({

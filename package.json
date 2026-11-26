@@ -33,6 +33,7 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "check": "tsx src/index.ts --check",
+    "abstain": "tsx scripts/abstain.ts --misses",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

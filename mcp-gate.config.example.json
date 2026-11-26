@@ -20,6 +20,8 @@
     "maxEnabled": 20,
     "idleTtlSec": 900,
     "routeFloor": 1,
+    "routeMinMatched": 2,
+    "routeMinCoverage": 0.34,
     "routeTopK": 5,
     "autoEnable": []
   }
