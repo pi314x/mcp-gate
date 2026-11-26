@@ -78,6 +78,23 @@ const META_TOOLS: Tool[] = [
   }
 ];
 
+/** Offered only when a skills server is configured, so the default gate keeps its six tools. */
+const CAPSULE_TOOL: Tool = {
+  name: 'gate_capsule',
+  description:
+    'Describe your task and get, in one call, the procedure (a skill) that fits it from the connected skills server, with the tools that procedure names enabled. Returns no skill, and enables nothing, when none fits: then use what you already have.',
+  inputSchema: {
+    type: 'object',
+    properties: { task: { type: 'string', description: 'The task, in your own words.' } },
+    required: ['task']
+  }
+};
+
+const instructionsFor = (gate: Gate): string =>
+  gate.config.gate.skillsServer === undefined
+    ? INSTRUCTIONS
+    : `${INSTRUCTIONS}\nA skills server is connected: gate_capsule(task) returns the procedure that fits the task and enables the tools it names, in one call.`;
+
 const toolDefinition = (tool: CatalogTool): Tool => ({
   name: tool.qualified,
   description: tool.description,
@@ -91,7 +108,7 @@ const toolDefinition = (tool: CatalogTool): Tool => ({
  * against every tool the policy lets through, which is what a client would be sent without a gate. Denied tools stay
  * out of the baseline, so the saving is not inflated by tools the client could never have used.
  */
-function recordListing(gate: Gate, listed: Tool[]): void {
+function recordListing(gate: Gate, listed: Tool[], enabledCount: number): void {
   if (gate.ledger === undefined) return;
   const offered = gate
     .catalog()
@@ -99,9 +116,9 @@ function recordListing(gate: Gate, listed: Tool[]): void {
     .map(toolDefinition);
   gate.ledger.record({
     kind: 'tools_list',
-    sent: countTokens(JSON.stringify(listed)) + countTokens(INSTRUCTIONS),
+    sent: countTokens(JSON.stringify(listed)) + countTokens(instructionsFor(gate)),
     baseline: countTokens(JSON.stringify(offered)),
-    meta: { enabled: listed.length - META_TOOLS.length, offered: offered.length }
+    meta: { enabled: enabledCount, offered: offered.length }
   });
 }
 
@@ -161,6 +178,25 @@ function metaCall(gate: Gate, session: GateSession, name: string, args: Record<s
   }
 }
 
+async function capsuleCall(gate: Gate, session: GateSession, args: Record<string, unknown>, signal: AbortSignal): Promise<CallToolResult> {
+  if (gate.config.gate.skillsServer === undefined) return failure('No skills server is configured, so there is no gate_capsule.');
+  if (typeof args.task !== 'string' || args.task.trim() === '') return failure('task must be a non-empty string.');
+  try {
+    const report = await session.capsule(args.task, signal);
+    const result = json(report);
+    // Baseline 0: the capsule replaces a route, a fetch and an enable, none of which has an honest baseline of its own.
+    gate.ledger?.record({
+      kind: 'capsule',
+      sent: countTokens(JSON.stringify(result.content)),
+      baseline: 0,
+      meta: { matched: report.skill !== undefined, enabled: report.tools?.enabled.length ?? 0 }
+    });
+    return result;
+  } catch (error) {
+    return failure(`gate_capsule failed: ${messageOf(error)}`);
+  }
+}
+
 /**
  * One serving unit of the gate: the `gate_*` tools plus whatever this session has enabled.
  * `ownsSession` is false when the session outlives this instance (a per-request instance on stateless HTTP).
@@ -168,12 +204,13 @@ function metaCall(gate: Gate, session: GateSession, name: string, args: Record<s
 export function createGateServer(gate: Gate, session: GateSession, options: { ownsSession?: boolean } = {}): Server {
   const server = new Server(
     { name: NAME, version: VERSION },
-    { capabilities: { tools: { listChanged: true } }, instructions: INSTRUCTIONS }
+    { capabilities: { tools: { listChanged: true } }, instructions: instructionsFor(gate) }
   );
 
   server.setRequestHandler('tools/list', () => {
-    const tools = [...META_TOOLS, ...session.enabledTools().map(toolDefinition)];
-    recordListing(gate, tools);
+    const enabled = session.enabledTools();
+    const tools = [...META_TOOLS, ...(gate.config.gate.skillsServer === undefined ? [] : [CAPSULE_TOOL]), ...enabled.map(toolDefinition)];
+    recordListing(gate, tools, enabled.length);
     return { tools };
   });
 
@@ -181,6 +218,9 @@ export function createGateServer(gate: Gate, session: GateSession, options: { ow
     const { name } = request.params;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
 
+    if (name === CAPSULE_TOOL.name) {
+      return server.projectCallToolResult(await capsuleCall(gate, session, args, ctx.mcpReq.signal), undefined);
+    }
     if (name.startsWith(META_PREFIX)) {
       return server.projectCallToolResult(metaCall(gate, session, name, args), undefined);
     }

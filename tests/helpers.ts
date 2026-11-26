@@ -10,6 +10,8 @@ import { createGateServer } from '../src/server.js';
 export interface FakeTool {
   description: string;
   run?: (args: Record<string, unknown>) => string;
+  /** The tool's input schema. Defaults to one optional `text`; arguments it does not name never reach `run`. */
+  schema?: z.ZodObject<z.ZodRawShape>;
 }
 
 /** A downstream MCP server living in memory. Each connect builds a fresh instance, so reconnects work. */
@@ -20,7 +22,7 @@ export function fakeServer(tools: Record<string, FakeTool>): { connector: Connec
     for (const [name, tool] of Object.entries(tools)) {
       server.registerTool(
         name,
-        { description: tool.description, inputSchema: z.object({ text: z.string().optional() }) },
+        { description: tool.description, inputSchema: tool.schema ?? z.object({ text: z.string().optional() }) },
         (args: Record<string, unknown>) => ({ content: [{ type: 'text' as const, text: tool.run?.(args) ?? `${name} ran` }] })
       );
     }

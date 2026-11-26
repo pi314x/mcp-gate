@@ -1,5 +1,5 @@
 import type { CallToolResult } from '@modelcontextprotocol/client';
-import { corroborated, rank, splitQualified, type CatalogTool } from './catalog.js';
+import { corroborated, qualify, rank, splitQualified, type CatalogTool } from './catalog.js';
 import type { GateConfig } from './config.js';
 import { Downstream, connectorFor, type Connector, type DownstreamStatus } from './downstream.js';
 import { globToRegExp } from './glob.js';
@@ -32,6 +32,41 @@ interface Usage {
   since: number;
   lastUsed: number;
   calls: number;
+}
+
+export interface CapsuleReport {
+  /** The skill that was served; absent when the skills server found none that fits the task. */
+  skill?: string;
+  procedure?: string;
+  /** What happened to each tool the skill names, as for `gate_enable_tools`. */
+  tools?: EnableReport;
+  /** Tools the skill names that match no tool behind the gate, or more than one: nothing was enabled for them. */
+  unresolved?: string[];
+  hint?: string;
+}
+
+const textOf = (result: CallToolResult): string => result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+
+/** The shortlist of a skills-router `route_skill` result. Anything that is not that shape is no shortlist, never a guess. */
+function skillMatches(result: CallToolResult): { name: string; tools: string[] }[] {
+  if (result.isError === true) throw new Error('the skills server could not route the task.');
+  let payload: unknown = result.structuredContent;
+  if (payload === undefined) {
+    try {
+      payload = JSON.parse(textOf(result));
+    } catch {
+      return [];
+    }
+  }
+  const matches = (payload as { matches?: unknown } | null)?.matches;
+  if (!Array.isArray(matches)) return [];
+  const found: { name: string; tools: string[] }[] = [];
+  for (const entry of matches as Record<string, unknown>[]) {
+    if (typeof entry?.name !== 'string') continue;
+    const tools = Array.isArray(entry.tools) ? entry.tools.filter((tool): tool is string => typeof tool === 'string') : [];
+    found.push({ name: entry.name, tools });
+  }
+  return found;
 }
 
 const oneLine = (text: string, max = 160): string => {
@@ -212,6 +247,44 @@ export class GateSession {
     }
     if (report.enabled.length > 0 && options.silent !== true) this.notify();
     return report;
+  }
+
+  /**
+   * One call for a task: the procedure that fits it, from the skills server, and the tools that procedure names, enabled.
+   * It asks the skills server to route and then to serve the best skill, so both of those tools must be allowed by that
+   * server's policy (deny wins here too). Returns no skill, and enables nothing, when the skills server finds none that
+   * fits. Each tool the skill names goes through the same `enable` as any other, so policy, confirmation and capacity apply.
+   */
+  async capsule(task: string, signal?: AbortSignal): Promise<CapsuleReport> {
+    const server = this.gate.config.gate.skillsServer;
+    if (server === undefined) throw new Error('no skills server is configured (gate.skillsServer).');
+    const routeTool = this.gate.find(qualify(server, 'route_skill'));
+    const getTool = this.gate.find(qualify(server, 'get_skill'));
+    if (routeTool === undefined || getTool === undefined) {
+      throw new Error(`server "${server}" does not offer route_skill and get_skill, or is not reachable; is it skills-router?`);
+    }
+    for (const tool of [routeTool, getTool]) {
+      if (this.gate.decisionFor(tool).verdict !== 'allow') throw new Error(`the policy of "${server}" does not allow ${tool.qualified}, so the gate cannot ask it for a skill.`);
+    }
+
+    const routed = skillMatches(await this.gate.call(routeTool.qualified, { task, top_k: 1 }, signal));
+    const best = routed[0];
+    if (best === undefined) return { hint: 'No skill fits this task. Use the tools you already have.' };
+
+    const served = await this.gate.call(getTool.qualified, { name: best.name }, signal);
+    if (served.isError === true) throw new Error(`"${server}" could not serve the skill ${best.name}.`);
+    const procedure = textOf(served);
+
+    const catalog = this.gate.catalog().filter((tool) => tool.server !== server);
+    const resolved: string[] = [];
+    const unresolved: string[] = [];
+    for (const wanted of best.tools) {
+      const exact = catalog.find((tool) => tool.qualified === wanted);
+      const named = exact === undefined ? catalog.filter((tool) => tool.tool === wanted) : [exact];
+      if (named.length === 1) resolved.push(named[0]!.qualified);
+      else unresolved.push(wanted);
+    }
+    return { skill: best.name, procedure, tools: this.enable(resolved), unresolved };
   }
 
   disable(patterns: readonly string[] | 'all'): string[] {

@@ -41,7 +41,12 @@ const gateSchema = z
     /** Most tools `gate_route` enables for one task. */
     routeTopK: z.number().int().min(1).max(50).default(5),
     /** Qualified names or patterns enabled in every new session (`server__tool`, `*` wildcard). */
-    autoEnable: z.array(z.string()).default([])
+    autoEnable: z.array(z.string()).default([]),
+    /**
+     * Name of a downstream server that serves skills (skills-router: `route_skill` and `get_skill`). When set, the gate
+     * offers a seventh tool, `gate_capsule`, that returns the procedure that fits a task and enables the tools it names.
+     */
+    skillsServer: z.string().optional()
   })
   .default({ maxEnabled: 25, idleTtlSec: 0, routeFloor: 1, routeMinMatched: 2, routeMinCoverage: 0.34, routeTopK: 5, autoEnable: [] });
 
@@ -57,6 +62,11 @@ export const configSchema = z.object({
     })
     .default({}),
   gate: gateSchema
+}).superRefine((config, ctx) => {
+  const { skillsServer } = config.gate;
+  if (skillsServer !== undefined && !(skillsServer in config.servers)) {
+    ctx.addIssue({ code: 'custom', path: ['gate', 'skillsServer'], message: `"${skillsServer}" is not one of the configured servers` });
+  }
 });
 
 export type GateConfig = z.infer<typeof configSchema>;

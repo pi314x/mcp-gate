@@ -11,7 +11,7 @@ Every MCP server you connect adds its whole tool list to the model's context, wh
 └────────────┘                         └──────────┘               └──────────────────┘
 ```
 
-At first a client sees only six `gate_*` tools. Tools of the downstream servers appear, named `<server>__<tool>`, once the gate enables them, and the gate sends `notifications/tools/list_changed` so the client re-lists.
+At first a client sees only six `gate_*` tools (a seventh, `gate_capsule`, when a skills server is configured: see [below](#a-procedure-and-its-tools-in-one-call-optional)). Tools of the downstream servers appear, named `<server>__<tool>`, once the gate enables them, and the gate sends `notifications/tools/list_changed` so the client re-lists.
 
 ## How the gate decides
 
@@ -31,6 +31,25 @@ The decision rests on rules you set, not on a model:
 - **Idleness**: tools unused for `idleTtlSec` are switched off again.
 - **Always-on**: `autoEnable` lists tools every session starts with.
 - **Routing** is lexical (names weigh three times descriptions, rarer words weigh more), deterministic, with no model call and no network. It scores only metadata, never schemas, and the floor makes "no match" a real answer. A router that always names a best guess applies tools to tasks they were never meant for.
+
+### A procedure and its tools in one call (optional)
+
+A skills server such as [skills-router](https://github.com/pi314x/skills-router) serves *procedures*, and each procedure names the tools it uses. Without help, a model has to ask for the shortlist, fetch the procedure, then enable the tools one by one. Name that server in the configuration and the gate adds a seventh tool that does all three:
+
+```jsonc
+"servers": { "skills": { "url": "http://127.0.0.1:8001/mcp" }, "github": { /* ... */ } },
+"gate": { "skillsServer": "skills" }
+```
+
+`gate_capsule(task)` asks the skills server to route the task (`route_skill`, best match only) and serve that skill (`get_skill`), returns the procedure, and enables the tools it names through the same path as `gate_enable_tools`. A name the skill gives without a server prefix is resolved only when exactly one tool behind the gate has that name; a name that matches none or several is listed as `unresolved` and enables nothing. The tool exists only when `skillsServer` is set, so the default gate keeps its six.
+
+What it will not do:
+
+- **Guess.** When the skills server finds no skill that fits, it returns none and enables nothing.
+- **Override policy.** `deny` wins: a denied tool is reported and never enabled, and a tool that needs confirmation stays off until the caller confirms. The gate also refuses to ask a skills server whose own policy denies `route_skill` or `get_skill`.
+- **Pre-rank code.** The idea of also handing the model the code areas a procedure touches, through [lean-context](https://github.com/pi314x/lean-context), is not built.
+
+It is not measured. `gate_route` has a benchmark for how often it serves the right tools and abstains on the wrong tasks; `gate_capsule` has only tests, and how often the skills server routes to the right skill is the skills server's own measurement. When ledger accounting is on, each call is written as a `capsule` event with a baseline of `0`, because it replaces a route, a fetch and an enable that have no honest baseline of their own.
 
 ### Saying "nothing fits"
 
@@ -109,6 +128,7 @@ Set `CTX_LEDGER_FILE=<path>` and the gate appends one line per event to a [ctx-l
 
 - `tools_list`, once per listing: `sent` is the gate's own tools, the enabled ones and its instructions; `baseline` is every tool the policy lets through, which is what a client would be sent without a gate. Tools the policy denies are left out of the baseline, so the saving is not inflated by tools nobody could use. It is one listing, not one model request: a client that resends the list pays that amount on each request until it changes.
 - `route`, once per `gate_route` call: the size of the answer, with a baseline of `0`, because the answer is extra cost on top of the listing.
+- `capsule`, once per `gate_capsule` call: likewise, with a baseline of `0`.
 
 Lines hold counts and ids only, never a task or a tool name, and a ledger that cannot be written never fails a request. Tokens are counted with the same `heuristic-v1` estimate as lean-context, not with a model tokenizer. It is off unless the file is set. `src/ledger.ts` and `src/ledger-tokens.ts` are byte-identical copies from ctx-ledger's `canonical/`, and its tests fail if they drift.
 
@@ -165,7 +185,8 @@ One JSON file (`--config`, `MCP_GATE_CONFIG`, or `./mcp-gate.config.json`). See 
     "routeMinMatched": 2, // distinct words a tool must share with the task (all of them, for a shorter task)
     "routeMinCoverage": 0.34, // and this fraction of the task's distinct words; unknown words count against it
     "routeTopK": 5,       // most tools gate_route enables for one task
-    "autoEnable": []      // tools every session starts with, e.g. ["filesystem__read_file"]
+    "autoEnable": [],     // tools every session starts with, e.g. ["filesystem__read_file"]
+    "skillsServer": "skills" // optional: a configured server that serves skills; adds gate_capsule
   }
 }
 ```
