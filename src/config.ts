@@ -46,9 +46,36 @@ const gateSchema = z
      * Name of a downstream server that serves skills (skills-router: `route_skill` and `get_skill`). When set, the gate
      * offers a seventh tool, `gate_capsule`, that returns the procedure that fits a task and enables the tools it names.
      */
-    skillsServer: z.string().optional()
+    skillsServer: z.string().optional(),
+    /**
+     * The least score the skills server must give its best match for `gate_capsule` to serve it. The scale is the skills
+     * server's own (skills-router's lexical score grows with the words a task shares with a skill and shifts with the
+     * size of the catalog), so calibrate it on your catalog with `npm run capsule -- --scores`. A server that reports no
+     * score is not held to it.
+     */
+    skillsMinScore: z.number().min(0).default(12),
+    /**
+     * Name of a downstream server that is lean-context (`ctx_search`, `ctx_symbol`, `ctx_read`). With `skillsServer`, a
+     * capsule that found a skill also carries the code areas that match the task, ranked by that server, and the tools to expand them.
+     */
+    codeServer: z.string().optional(),
+    /** Token budget the capsule gives `ctx_search` for its code areas. */
+    codeBudgetTokens: z.number().int().min(100).max(4000).default(800),
+    /** Most code areas the capsule asks `ctx_search` for. */
+    codeMaxResults: z.number().int().min(1).max(20).default(4)
   })
-  .default({ maxEnabled: 25, idleTtlSec: 0, routeFloor: 1, routeMinMatched: 2, routeMinCoverage: 0.34, routeTopK: 5, autoEnable: [] });
+  .default({
+    maxEnabled: 25,
+    idleTtlSec: 0,
+    routeFloor: 1,
+    routeMinMatched: 2,
+    routeMinCoverage: 0.34,
+    routeTopK: 5,
+    autoEnable: [],
+    skillsMinScore: 12,
+    codeBudgetTokens: 800,
+    codeMaxResults: 4
+  });
 
 export const configSchema = z.object({
   servers: z
@@ -63,9 +90,15 @@ export const configSchema = z.object({
     .default({}),
   gate: gateSchema
 }).superRefine((config, ctx) => {
-  const { skillsServer } = config.gate;
+  const { skillsServer, codeServer } = config.gate;
   if (skillsServer !== undefined && !(skillsServer in config.servers)) {
     ctx.addIssue({ code: 'custom', path: ['gate', 'skillsServer'], message: `"${skillsServer}" is not one of the configured servers` });
+  }
+  if (codeServer !== undefined && !(codeServer in config.servers)) {
+    ctx.addIssue({ code: 'custom', path: ['gate', 'codeServer'], message: `"${codeServer}" is not one of the configured servers` });
+  }
+  if (codeServer !== undefined && skillsServer === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['gate', 'codeServer'], message: 'codeServer needs skillsServer: code areas are part of a capsule, which only exists with a skills server' });
   }
 });
 

@@ -12,6 +12,8 @@ const BODY = '# Skill: plan-event\n\nCreate the event, then read the agenda file
 interface Route {
   name: string;
   tools: string[];
+  /** What the fake skills server reports as its score; 20 (a clear match) when absent, and no score at all for `null`. */
+  score?: number | null;
 }
 
 /** A skills-router stand-in: routes any task that mentions a calendar to `route`, and serves one procedure. */
@@ -20,7 +22,7 @@ function skillsServer(route: Route | undefined) {
     route_skill: {
       description: 'Shortlist the skills worth considering for a task description',
       schema: z.object({ task: z.string(), top_k: z.number().optional() }),
-      run: (args) => JSON.stringify({ task: args.task, matches: route !== undefined && String(args.task).includes('calendar') ? [{ ...route, score: 3 }] : [] })
+      run: (args) => JSON.stringify({ task: args.task, matches: route !== undefined && String(args.task).includes('calendar') ? [route.score === null ? { name: route.name, tools: route.tools } : { ...route, score: route.score ?? 20 }] : [] })
     },
     get_skill: {
       description: 'Full procedure for one skill',
@@ -40,7 +42,16 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-async function start(options: { route?: Route | undefined; policy?: Record<string, unknown>; skillsPolicy?: Record<string, unknown>; configured?: boolean; ledger?: ReturnType<typeof ledgerFromEnv> } = {}): Promise<Rig> {
+async function start(
+  options: {
+    route?: Route | undefined;
+    policy?: Record<string, unknown>;
+    skillsPolicy?: Record<string, unknown>;
+    configured?: boolean;
+    gate?: Record<string, unknown>;
+    ledger?: ReturnType<typeof ledgerFromEnv>;
+  } = {}
+): Promise<Rig> {
   const route = 'route' in options ? options.route : PLAN;
   current = await rig({
     downstreams: { files: fakeServer(FILES).connector, calendar: fakeServer(CALENDAR).connector, skills: skillsServer(route).connector },
@@ -49,7 +60,7 @@ async function start(options: { route?: Route | undefined; policy?: Record<strin
       calendar: { command: 'unused', ...(options.policy !== undefined && { policy: options.policy }) },
       skills: { command: 'unused', ...(options.skillsPolicy !== undefined && { policy: options.skillsPolicy }) }
     },
-    gate: options.configured === false ? {} : { skillsServer: 'skills' },
+    gate: options.configured === false ? {} : (options.gate ?? { skillsServer: 'skills' }),
     ...(options.ledger !== undefined && { ledger: options.ledger })
   });
   return current;
@@ -160,6 +171,33 @@ describe('gate_capsule', () => {
   it('refuses a task that is not a non-empty string', async () => {
     const r = await start();
     expect((await r.client.callTool({ name: 'gate_capsule', arguments: { task: '  ' } })).isError).toBe(true);
+  });
+
+  it('does not serve a skill the skills server scores below the floor: a lexical router names a best guess for almost any task', async () => {
+    const weak = await start({ route: { ...PLAN, score: 7.84 } });
+    const report = jsonOf<Report>(await capsule(weak, 'plan a calendar event'));
+    expect(report.skill).toBeUndefined();
+    expect(report.procedure).toBeUndefined();
+    expect(report.hint).toMatch(/No skill fits/);
+    expect((await toolNames(weak.client)).filter((name) => !name.startsWith('gate_'))).toEqual([]);
+  });
+
+  it('serves a skill that scores exactly the floor, and moves with skillsMinScore', async () => {
+    const exact = await start({ route: { ...PLAN, score: 12 } });
+    expect(jsonOf<Report>(await capsule(exact, 'plan a calendar event')).skill).toBe('plan-event');
+    await exact.close();
+
+    const strict = await start({ route: { ...PLAN, score: 20 }, gate: { skillsServer: 'skills', skillsMinScore: 25 } });
+    expect(jsonOf<Report>(await capsule(strict, 'plan a calendar event')).skill).toBeUndefined();
+    await strict.close();
+
+    const lenient = await start({ route: { ...PLAN, score: 7.84 }, gate: { skillsServer: 'skills', skillsMinScore: 0 } });
+    expect(jsonOf<Report>(await capsule(lenient, 'plan a calendar event')).skill).toBe('plan-event');
+  });
+
+  it('does not hold a skills server that reports no score to the floor', async () => {
+    const unscored = await start({ route: { ...PLAN, score: null } });
+    expect(jsonOf<Report>(await capsule(unscored, 'plan a calendar event')).skill).toBe('plan-event');
   });
 
   it('is a configuration error to name a skills server that is not configured', () => {

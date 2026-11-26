@@ -42,13 +42,17 @@ export interface CapsuleReport {
   tools?: EnableReport;
   /** Tools the skill names that match no tool behind the gate, or more than one: nothing was enabled for them. */
   unresolved?: string[];
+  /** The code areas that match the task, as the code server ranked them. Absent when there is no code server or it found none. */
+  codeAreas?: string;
+  /** Why code areas are missing when something went wrong, or the code server was not allowed to answer. */
+  note?: string;
   hint?: string;
 }
 
 const textOf = (result: CallToolResult): string => result.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
 
 /** The shortlist of a skills-router `route_skill` result. Anything that is not that shape is no shortlist, never a guess. */
-function skillMatches(result: CallToolResult): { name: string; tools: string[] }[] {
+function skillMatches(result: CallToolResult): { name: string; tools: string[]; score?: number }[] {
   if (result.isError === true) throw new Error('the skills server could not route the task.');
   let payload: unknown = result.structuredContent;
   if (payload === undefined) {
@@ -60,11 +64,11 @@ function skillMatches(result: CallToolResult): { name: string; tools: string[] }
   }
   const matches = (payload as { matches?: unknown } | null)?.matches;
   if (!Array.isArray(matches)) return [];
-  const found: { name: string; tools: string[] }[] = [];
+  const found: { name: string; tools: string[]; score?: number }[] = [];
   for (const entry of matches as Record<string, unknown>[]) {
     if (typeof entry?.name !== 'string') continue;
     const tools = Array.isArray(entry.tools) ? entry.tools.filter((tool): tool is string => typeof tool === 'string') : [];
-    found.push({ name: entry.name, tools });
+    found.push({ name: entry.name, tools, ...(typeof entry.score === 'number' && { score: entry.score }) });
   }
   return found;
 }
@@ -269,7 +273,10 @@ export class GateSession {
 
     const routed = skillMatches(await this.gate.call(routeTool.qualified, { task, top_k: 1 }, signal));
     const best = routed[0];
-    if (best === undefined) return { hint: 'No skill fits this task. Use the tools you already have.' };
+    // A lexical router names its best guess for almost any task, so a weak score is "no skill", not a skill.
+    if (best === undefined || (best.score !== undefined && best.score < this.gate.config.gate.skillsMinScore)) {
+      return { hint: 'No skill fits this task. Use the tools you already have.' };
+    }
 
     const served = await this.gate.call(getTool.qualified, { name: best.name }, signal);
     if (served.isError === true) throw new Error(`"${server}" could not serve the skill ${best.name}.`);
@@ -284,7 +291,39 @@ export class GateSession {
       if (named.length === 1) resolved.push(named[0]!.qualified);
       else unresolved.push(wanted);
     }
-    return { skill: best.name, procedure, tools: this.enable(resolved), unresolved };
+    const codeServer = this.gate.config.gate.codeServer;
+    const code = codeServer === undefined ? {} : await this.codeAreas(codeServer, task, signal);
+    // The expand hints in the code areas name ctx_symbol and ctx_read, so they are enabled with them and only then.
+    const expand = code.areas === undefined || codeServer === undefined ? [] : [qualify(codeServer, 'ctx_symbol'), qualify(codeServer, 'ctx_read')];
+    return {
+      skill: best.name,
+      procedure,
+      ...(code.areas !== undefined && { codeAreas: code.areas }),
+      tools: this.enable([...resolved, ...expand]),
+      unresolved,
+      ...(code.note !== undefined && { note: code.note })
+    };
+  }
+
+  /**
+   * The code areas for a task, from the code server's `ctx_search` with a small budget. They are advice added to a
+   * capsule, never a reason to fail one: a server that is missing, denied by its policy, failing or finding nothing
+   * leaves them out (with a note, except when it simply found nothing).
+   */
+  private async codeAreas(server: string, task: string, signal?: AbortSignal): Promise<{ areas?: string; note?: string }> {
+    const search = this.gate.find(qualify(server, 'ctx_search'));
+    if (search === undefined) return { note: `the code server "${server}" does not offer ctx_search, or is not reachable.` };
+    if (this.gate.decisionFor(search).verdict !== 'allow') return { note: `the policy of "${server}" does not allow ${search.qualified}, so no code areas were searched.` };
+    try {
+      const { codeBudgetTokens, codeMaxResults } = this.gate.config.gate;
+      const result = await this.gate.call(search.qualified, { query: task.slice(0, 500), budget_tokens: codeBudgetTokens, max_results: codeMaxResults }, signal);
+      if (result.isError === true) return { note: `${search.qualified} failed: ${oneLine(textOf(result), 120)}` };
+      const text = textOf(result).trim();
+      // A hit list opens with its count; "No matches for ..." and anything else is no code area.
+      return /^\d+ results? for /.test(text) ? { areas: text } : {};
+    } catch (error) {
+      return { note: `could not search the code: ${messageOf(error)}` };
+    }
   }
 
   disable(patterns: readonly string[] | 'all'): string[] {

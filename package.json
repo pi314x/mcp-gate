@@ -34,6 +34,7 @@
     "dev": "tsx src/index.ts",
     "check": "tsx src/index.ts --check",
     "abstain": "tsx scripts/abstain.ts --misses",
+    "capsule": "tsx scripts/capsule-bench.ts --misses",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

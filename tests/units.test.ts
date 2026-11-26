@@ -114,7 +114,10 @@ describe('configuration', () => {
       routeMinMatched: 2,
       routeMinCoverage: 0.34,
       routeTopK: 5,
-      autoEnable: []
+      autoEnable: [],
+      skillsMinScore: 12,
+      codeBudgetTokens: 800,
+      codeMaxResults: 4
     });
   });
 

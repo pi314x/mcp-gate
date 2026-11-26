@@ -189,7 +189,7 @@ async function capsuleCall(gate: Gate, session: GateSession, args: Record<string
       kind: 'capsule',
       sent: countTokens(JSON.stringify(result.content)),
       baseline: 0,
-      meta: { matched: report.skill !== undefined, enabled: report.tools?.enabled.length ?? 0 }
+      meta: { matched: report.skill !== undefined, enabled: report.tools?.enabled.length ?? 0, code: report.codeAreas !== undefined }
     });
     return result;
   } catch (error) {

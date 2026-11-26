@@ -45,11 +45,35 @@ A skills server such as [skills-router](https://github.com/pi314x/skills-router)
 
 What it will not do:
 
-- **Guess.** When the skills server finds no skill that fits, it returns none and enables nothing.
+- **Guess.** When the skills server finds no skill that fits, or scores its best match below `skillsMinScore` (12 by default), it returns none and enables nothing. A lexical router names a best guess for almost any task, so a weak score is treated as no skill. The score scale is the skills server's own and shifts with the size of its catalog, so calibrate the floor on yours with `npm run capsule -- --scores`; a server that reports no score is not held to it.
 - **Override policy.** `deny` wins: a denied tool is reported and never enabled, and a tool that needs confirmation stays off until the caller confirms. The gate also refuses to ask a skills server whose own policy denies `route_skill` or `get_skill`.
-- **Pre-rank code.** The idea of also handing the model the code areas a procedure touches, through [lean-context](https://github.com/pi314x/lean-context), is not built.
+- **Search code for a task that has no skill.** Code areas (below) are part of a capsule for a skill that matched, never a second route.
 
-It is not measured. `gate_route` has a benchmark for how often it serves the right tools and abstains on the wrong tasks; `gate_capsule` has only tests, and how often the skills server routes to the right skill is the skills server's own measurement. When ledger accounting is on, each call is written as a `capsule` event with a baseline of `0`, because it replaces a route, a fetch and an enable that have no honest baseline of their own.
+**Code areas (optional).** Name a [lean-context](https://github.com/pi314x/lean-context) server too, and a capsule that found a skill also carries the code that matches the task:
+
+```jsonc
+"gate": { "skillsServer": "skills", "codeServer": "context" }   // codeBudgetTokens 800, codeMaxResults 4
+```
+
+The gate asks `ctx_search` for the task with that small budget and puts its hit list in `codeAreas`, then enables `ctx_symbol` and `ctx_read` so the "Expand:" hints in the hits can be followed. They are advice added to a capsule, never a reason to fail one: a code server that is missing, denied by its policy, failing, or finding nothing leaves them out (with a `note`, except when it simply found nothing). It needs `skillsServer`.
+
+**Measured**, with [`npm run capsule`](scripts/capsule-bench.ts): the real gate over the real skills-router and the real lean-context, on skills-router's two catalogs (11 procedures) and lean-context's bundled fixture repo, with [`bench/capsule.json`](bench/capsule.json) (34 tasks written like a person would ask, including traps that share a word with a skill: *review my holiday photos, triage my inbox, explain what a pull request is*). It needs skills-router and lean-context checked out next to this repository. The tools the skills name (GitHub, Postgres, radar) do not exist there, so a stand-in server offers tools of those names; only the names matter to a capsule. The `final` tasks are the numbers to quote.
+
+| 19 `final` tasks | Right skill served (12 tasks that need one) | Returned none (7 that need none) | Exactly the skill's tools enabled | A right file in the code areas (4 tasks that have one) |
+|---|---:|---:|---:|---:|
+| no score floor | 12 of 12 | 2 of 7 | 12 of 12 | 4 of 4 |
+| `skillsMinScore` 12 (default) | 10 of 12 | 6 of 7 | 10 of 12 | 4 of 4 |
+
+Read the floor as a trade: it fixed four unrelated tasks that were being given a procedure and its tools (*explain how the Python garbage collector works* reached `diagnose-slow-query`, *triage my inbox* reached `triage-alert`), and cost two real ones, both short phrasings that share few words with their skill ("look over PR 412 and tell me whether it is safe to merge", "should I buy this coin now"). The one false positive left is "explain what a pull request is", which a lexical router cannot tell from a request to review one. The floor was chosen by looking at the 15 `tuning` tasks, where every real match scored 15.8 to 41.2 and every unrelated task 7.8 or less, and the gap is wide, but it is one catalog of 11 skills and a score scale that is not this project's. The 4 code tasks in `final` were added after the first run showed the alternating split had put every code task into `tuning`; they are in new wording and nothing was tuned against the tuning code results.
+
+Tokens (the `heuristic-v1` estimate, median per task, against the same information fetched by hand with each tool's defaults: `route_skill` top 3, `get_skill`, one enable, `ctx_search` at 1500 tokens and 6 results):
+
+| Served `final` tasks | Capsule | By hand |
+|---|---:|---:|
+| 4 with a code topic | 1,279 tokens, 1 call | 1,617 tokens, 4 calls |
+| 6 without one | 1,362 tokens, 1 call | 1,105 tokens, 3 calls |
+
+The capsule saves a fifth of the tokens and three calls when the task has a code topic. When it has none, the always-on code search still returns hits for every served task (10 of 10), so the capsule costs about a quarter more tokens than fetching by hand and saves two calls: leave `codeServer` out where tasks are not about code. The calls are counted as one tool call each, not as the model's own words. When ledger accounting is on, each call is written as a `capsule` event with a baseline of `0`, because it replaces a route, a fetch and an enable that have no honest baseline of their own.
 
 ### Saying "nothing fits"
 
@@ -186,7 +210,9 @@ One JSON file (`--config`, `MCP_GATE_CONFIG`, or `./mcp-gate.config.json`). See 
     "routeMinCoverage": 0.34, // and this fraction of the task's distinct words; unknown words count against it
     "routeTopK": 5,       // most tools gate_route enables for one task
     "autoEnable": [],     // tools every session starts with, e.g. ["filesystem__read_file"]
-    "skillsServer": "skills" // optional: a configured server that serves skills; adds gate_capsule
+    "skillsServer": "skills", // optional: a configured server that serves skills; adds gate_capsule
+    "skillsMinScore": 12,     // the skills server's score a best match needs (its own scale; calibrate with npm run capsule -- --scores)
+    "codeServer": "context"   // optional, needs skillsServer: a lean-context server; a capsule then carries code areas
   }
 }
 ```
