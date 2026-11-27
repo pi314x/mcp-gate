@@ -12,18 +12,59 @@ const policySchema = z
 // Server names become the prefix of every tool (`<server>__<tool>`), so they stay simple and never contain `__`.
 const SERVER_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
+const AMOUNT = /^\d+(\.\d+)?$/;
+const amount = z.string().regex(AMOUNT, 'a plain decimal amount such as "0.002"');
+const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/, 'an 0x-prefixed 20-byte address');
+const network = z.string().regex(/^eip155:\d+$/, 'a CAIP-2 EVM network such as eip155:8453 (Base) or eip155:84532 (Base Sepolia)');
+
+/** Seller side: what a call to each tool of this server costs, in the seller's asset (e.g. { "analyze_pool": "0.002" }). */
+const pricingSchema = z.record(z.string(), amount).default({});
+
 const stdioServer = z.object({
   command: z.string().min(1),
   args: z.array(z.string()).default([]),
   env: z.record(z.string(), z.string()).default({}),
   cwd: z.string().optional(),
-  policy: policySchema
+  policy: policySchema,
+  pricing: pricingSchema
 });
 
 const httpServer = z.object({
   url: z.string().url(),
   headers: z.record(z.string(), z.string()).default({}),
-  policy: policySchema
+  policy: policySchema,
+  pricing: pricingSchema
+});
+
+/** Seller side: where payments for priced tools go, and who verifies and settles them. */
+const sellerSchema = z.object({
+  payTo: address,
+  network,
+  /** The EIP-3009 token, e.g. USDC. */
+  asset: address,
+  /** The token's EIP-712 domain name and version (USDC: "USDC" and "2"; check them for the token on your network). */
+  assetName: z.string().default('USDC'),
+  assetVersion: z.string().default('2'),
+  decimals: z.number().int().min(0).max(36).default(6),
+  /** An x402 facilitator (POST /verify, /settle). */
+  facilitatorUrl: z.string().url(),
+  maxTimeoutSeconds: z.number().int().min(10).max(3600).default(60)
+});
+
+/** Buyer side: a wallet that pays priced tools of downstream servers, inside hard caps. There are no default caps. */
+const buyerSchema = z.object({
+  /** Hex private key. Put it in the environment and reference it: "${MCP_GATE_WALLET_KEY}". */
+  privateKey: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/, 'a 32-byte hex private key (use ${ENV_VAR}, never the key itself)'),
+  /** The only network/asset pairs this wallet pays in. Anything else is refused. */
+  allow: z
+    .array(z.object({ network, asset: address, decimals: z.number().int().min(0).max(36).default(6), symbol: z.string().default('USDC') }))
+    .min(1),
+  /** Caps in the allowed asset's units. A call over any of them is refused, never paid. */
+  maxPerCall: amount,
+  maxPerSession: amount,
+  maxPerDay: amount,
+  /** When non-empty, only these recipients are paid. */
+  payTo: z.array(address).default([])
 });
 
 const gateSchema = z
@@ -88,8 +129,21 @@ export const configSchema = z.object({
       }
     })
     .default({}),
-  gate: gateSchema
+  gate: gateSchema,
+  seller: sellerSchema.optional(),
+  buyer: buyerSchema.optional()
 }).superRefine((config, ctx) => {
+  for (const [name, server] of Object.entries(config.servers)) {
+    if (Object.keys(server.pricing).length > 0 && config.seller === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['servers', name, 'pricing'], message: 'priced tools need a seller section (payTo, network, asset, facilitatorUrl)' });
+    }
+  }
+  if (config.buyer !== undefined) {
+    const { maxPerCall, maxPerSession, maxPerDay } = config.buyer;
+    if (Number(maxPerCall) > Number(maxPerSession) || Number(maxPerSession) > Number(maxPerDay)) {
+      ctx.addIssue({ code: 'custom', path: ['buyer'], message: 'caps must satisfy maxPerCall <= maxPerSession <= maxPerDay' });
+    }
+  }
   const { skillsServer, codeServer } = config.gate;
   if (skillsServer !== undefined && !(skillsServer in config.servers)) {
     ctx.addIssue({ code: 'custom', path: ['gate', 'skillsServer'], message: `"${skillsServer}" is not one of the configured servers` });
@@ -129,12 +183,14 @@ export function interpolateEnv<T>(value: T, env: NodeJS.ProcessEnv = process.env
 }
 
 export function parseConfig(raw: unknown, env: NodeJS.ProcessEnv = process.env): GateConfig {
-  const parsed = configSchema.safeParse(raw);
+  // Interpolate first, so formats (a URL, a private key) are checked on the real value, not on "${NAME}". No
+  // validation message repeats a value, so a secret cannot end up in an error.
+  const parsed = configSchema.safeParse(interpolateEnv(raw, env));
   if (!parsed.success) {
     const problems = parsed.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`);
     throw new Error(`invalid configuration:\n  ${problems.join('\n  ')}`);
   }
-  return interpolateEnv(parsed.data, env);
+  return parsed.data;
 }
 
 export async function loadConfig(path: string, env: NodeJS.ProcessEnv = process.env): Promise<GateConfig> {

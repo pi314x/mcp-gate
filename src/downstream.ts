@@ -147,19 +147,20 @@ export class Downstream {
       description: tool.description ?? tool.title ?? '',
       inputSchema: tool.inputSchema as Record<string, unknown>,
       ...(tool.outputSchema !== undefined && { outputSchema: tool.outputSchema as Record<string, unknown> }),
-      ...(tool.annotations !== undefined && { annotations: tool.annotations as Record<string, unknown> })
+      ...(tool.annotations !== undefined && { annotations: tool.annotations as Record<string, unknown> }),
+      ...(tool._meta !== undefined && { meta: tool._meta as Record<string, unknown> })
     }));
     this.options.onToolsChanged?.();
   }
 
-  async call(tool: string, args: Record<string, unknown> | undefined, signal?: AbortSignal): Promise<CallToolResult> {
+  async call(tool: string, args: Record<string, unknown> | undefined, signal?: AbortSignal, meta?: Record<string, unknown>): Promise<CallToolResult> {
     for (let attempt = 0; ; attempt += 1) {
       await this.connect();
       const client = this.client;
       if (client === undefined) throw new Error(`server "${this.name}" is not connected`);
       try {
         return await client.callTool(
-          { name: tool, ...(args !== undefined && { arguments: args }) },
+          { name: tool, ...(args !== undefined && { arguments: args }), ...(meta !== undefined && { _meta: meta }) },
           { timeout: this.timeoutMs, ...(signal !== undefined && { signal }) }
         );
       } catch (error) {

@@ -1,0 +1,22 @@
+{
+  "servers": {
+    "pools": {
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "cwd": "/opt/pool-safety-belt",
+      "policy": { "allow": ["list_pools", "list_chains", "get_pool_detail", "analyze_pool"] },
+      "pricing": { "analyze_pool": "0.002", "get_pool_detail": "0.0005" }
+    }
+  },
+  "gate": { "autoEnable": ["pools__*"] },
+  "seller": {
+    "payTo": "${SELLER_PAY_TO}",
+    "network": "eip155:84532",
+    "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "assetName": "USDC",
+    "assetVersion": "2",
+    "decimals": 6,
+    "facilitatorUrl": "${X402_FACILITATOR_URL}",
+    "maxTimeoutSeconds": 60
+  }
+}

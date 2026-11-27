@@ -221,6 +221,65 @@ One JSON file (`--config`, `MCP_GATE_CONFIG`, or `./mcp-gate.config.json`). See 
 - `${NAME}` in any string is replaced from the environment, so secrets stay out of the file. A missing variable is an error that names the variable, never a value.
 - A server that cannot connect is reported (`gate_list_servers`, `--check`) and skipped. It never stops the gate.
 
+## Paid tools (x402)
+
+The gate can **sell** tools and **buy** them, per call, in stablecoins, following the [x402 v2 MCP transport](https://github.com/x402-foundation/x402/blob/main/specs/transports-v2/mcp.md). Only the `exact` scheme on EVM networks with an EIP-3009 token (USDC) is implemented.
+
+```
+agent ──► buyer gate (wallet, caps) ──HTTP──► seller gate (paywall) ──► your MCP server (unchanged)
+                                                     │
+                                                     └─► x402 facilitator: verify, then settle
+```
+
+**Seller: put a price on tools of any MCP server you run.** The server itself does not change ([examples/seller.pool-safety-belt.json](examples/seller.pool-safety-belt.json) sells Pool Safety Belt's pool analysis):
+
+```jsonc
+"servers": { "pools": { "command": "npm", "args": ["run", "mcp"], "cwd": "/opt/pool-safety-belt",
+                        "policy": { "allow": ["list_pools", "list_chains", "get_pool_detail", "analyze_pool"] },
+                        "pricing": { "analyze_pool": "0.002", "get_pool_detail": "0.0005" } } },
+"gate": { "autoEnable": ["pools__*"] },
+"seller": { "payTo": "${SELLER_PAY_TO}", "network": "eip155:84532", "asset": "0x036C…CF7e",
+            "assetName": "USDC", "assetVersion": "2", "facilitatorUrl": "${X402_FACILITATOR_URL}" }
+```
+
+Serve it over HTTP (`mcp-gate --http`). A priced tool advertises its price in `tools/list` (`_meta["x402/price"]`, and in its description). An unpaid call gets the spec's `PaymentRequired` result. A paid call runs only after:
+
+- the payment matches the price, the recipient, the token and the tool exactly;
+- its EIP-3009 signature recovers to the payer;
+- it has not expired, its nonce has not been seen before (one signature buys one call);
+- the facilitator verified it.
+
+The payment is **settled only after the tool succeeded**: a failing tool costs the buyer nothing. A seller gate is a storefront: customers see what is for sale (use `autoEnable`), and the `gate_*` controls are hidden and refused. `deny` still wins, so a tool the policy denies is not for sale at any price; sell read-only tools and keep anything that trades or writes out of `allow`.
+
+**Buyer: let an agent pay, inside hard caps.** ([examples/buyer.json](examples/buyer.json))
+
+```jsonc
+"buyer": { "privateKey": "${MCP_GATE_WALLET_KEY}",
+           "allow": [{ "network": "eip155:84532", "asset": "0x036C…CF7e", "decimals": 6, "symbol": "USDC" }],
+           "maxPerCall": "0.01", "maxPerSession": "0.10", "maxPerDay": "1.00", "payTo": [] }
+```
+
+When a downstream tool answers with `PaymentRequired`, the wallet pays and retries the call once. It only pays:
+
+- in an allowed network and token, and only listed recipients (when `payTo` is not empty);
+- within every cap: per call, per session and per UTC day. There are no default caps; the config requires all three, nested.
+
+Otherwise the call fails with the reason ("0.002 USDC would go past maxPerCall …") and nothing is signed. Money is counted when a payment is sent and given back when the seller reports it did not charge (the tool failed) or rejected the payment. A settlement the seller could not complete stays counted, because the seller still holds a valid signature until it expires. The private key is read from the environment, checked after interpolation, and never appears in a message.
+
+**What has been verified:**
+
+- **Signing matches viem.** The EIP-712 / EIP-3009 signing produces signatures byte-identical to viem's for the same key and message, and each recovers the other's. viem is not a dependency; the check borrowed another project's copy.
+- **28 tests.** `tests/pay.test.ts` covers the paywall rules, the caps, refunds and replay, and runs an agent's gate paying a seller gate with real signatures. Removing settle-after-success, the replay guard or the caps fails them.
+- **One run with real processes.** A seller gate CLI over HTTP, the buyer gate and a local stand-in facilitator over HTTP: the agent saw the price, a free call cost nothing, a paid call returned its result with a receipt, and 0.002 USDC (2000 atomic units) was settled from buyer to seller.
+
+**What has not been verified:**
+
+- **No live chain.** It has **never run against a live facilitator, a real chain or real USDC.** Start on Base Sepolia (`eip155:84532`) with faucet USDC and a facilitator that serves testnet; check its current URL in the x402 docs.
+- **The token's EIP-712 domain must match exactly,** or every signature is invalid. USDC on Base Sepolia is `USDC` / `2`. On Base mainnet it is believed to be `USD Coin` / `2` (verify with the token's `name()` and `version()` before you take real money).
+- **Caps reset on restart.** The day total lives in the process, so keep `maxPerDay` at what you can afford to lose twice.
+- **Pool Safety Belt's `mcp` mode** starts its live chain scanner and, in the environment this was built in, did not answer the MCP handshake within 8 seconds. Run it where its RPCs work, and check `mcp-gate --check` connects before selling.
+- **Tax and licensing are yours.** Taking payments has rules where you live; check them before you charge.
+
 ## Two transports, and what each means for state
 
 Which tools are enabled is state, so how a client is recognised matters.

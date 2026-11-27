@@ -2,6 +2,7 @@ import { Server, type CallToolResult, type Tool } from '@modelcontextprotocol/se
 import type { CatalogTool } from './catalog.js';
 import type { Gate, GateSession } from './gate.js';
 import { countTokens } from './ledger-tokens.js';
+import { META_PAYMENT, META_PRICE, META_RESPONSE, readPaymentRequired, type PaymentRequired, type SettleResponse } from './pay/x402.js';
 import { messageOf } from './log.js';
 import { NAME, VERSION } from './version.js';
 
@@ -104,6 +105,25 @@ const toolDefinition = (tool: CatalogTool): Tool => ({
 });
 
 /**
+ * A tool as this gate lists it. A tool this gate sells carries its price in `_meta["x402/price"]`; a paid tool of a
+ * downstream server keeps the price it was listed with. Either way the description says so, so the model knows a call
+ * costs money before it makes one.
+ */
+function listedDefinition(gate: Gate, tool: CatalogTool): Tool {
+  const definition = toolDefinition(tool);
+  const sold = gate.seller?.priceMeta(tool.qualified);
+  const bought = tool.meta?.[META_PRICE] as { price?: string } | undefined;
+  const price = sold ?? bought;
+  if (price === undefined) return definition;
+  const label = typeof price.price === 'string' ? `${price.price} per call` : 'per call';
+  return {
+    ...definition,
+    description: `${definition.description} [Paid tool: ${label}, via x402.]`,
+    _meta: { ...(tool.meta ?? {}), [META_PRICE]: price }
+  };
+}
+
+/**
  * One `tools_list` event per listing: what the gate sends (its own tools, the enabled ones and its instructions)
  * against every tool the policy lets through, which is what a client would be sent without a gate. Denied tools stay
  * out of the baseline, so the saving is not inflated by tools the client could never have used.
@@ -178,6 +198,37 @@ function metaCall(gate: Gate, session: GateSession, name: string, args: Record<s
   }
 }
 
+/**
+ * A downstream tool asked to be paid. The wallet decides inside its caps; when it pays, the call is retried once with
+ * the payment. What it committed is given back when the seller reports it did not charge (the tool failed) or rejected
+ * the payment. A settlement the seller could not complete stays counted: it still holds a valid signature until expiry.
+ */
+async function payAndRetry(
+  gate: Gate,
+  session: GateSession,
+  name: string,
+  args: Record<string, unknown>,
+  required: PaymentRequired,
+  signal: AbortSignal
+): Promise<CallToolResult> {
+  const wallet = gate.wallet!;
+  const decision = wallet.decide(required, session.spent);
+  if (!decision.pay) return failure(`${name} is a paid tool, and the wallet did not pay: ${decision.reason}.`);
+  session.spent += decision.amount;
+  const result = await gate.call(name, args, signal, { [META_PAYMENT]: decision.payment });
+  const response = result._meta?.[META_RESPONSE] as SettleResponse | undefined;
+  const rejected = readPaymentRequired(result) !== undefined;
+  if (rejected || response?.errorReason === 'tool_failed_not_charged') {
+    wallet.refund(decision.amount);
+    session.spent -= decision.amount;
+  }
+  if (rejected) {
+    const why = (readPaymentRequired(result)?.error ?? 'no reason given').replace(/[^\w .:-]/g, '');
+    return failure(`${name} refused the payment of ${decision.label} (${why}); nothing was paid.`);
+  }
+  return result;
+}
+
 async function capsuleCall(gate: Gate, session: GateSession, args: Record<string, unknown>, signal: AbortSignal): Promise<CallToolResult> {
   if (gate.config.gate.skillsServer === undefined) return failure('No skills server is configured, so there is no gate_capsule.');
   if (typeof args.task !== 'string' || args.task.trim() === '') return failure('task must be a non-empty string.');
@@ -209,7 +260,9 @@ export function createGateServer(gate: Gate, session: GateSession, options: { ow
 
   server.setRequestHandler('tools/list', () => {
     const enabled = session.enabledTools();
-    const tools = [...META_TOOLS, ...(gate.config.gate.skillsServer === undefined ? [] : [CAPSULE_TOOL]), ...enabled.map(toolDefinition)];
+    // A seller gate is a storefront: its customers see what is for sale (autoEnable), never its controls.
+    const control = gate.seller !== undefined ? [] : [...META_TOOLS, ...(gate.config.gate.skillsServer === undefined ? [] : [CAPSULE_TOOL])];
+    const tools = [...control, ...enabled.map((tool) => listedDefinition(gate, tool))];
     recordListing(gate, tools, enabled.length);
     return { tools };
   });
@@ -218,6 +271,9 @@ export function createGateServer(gate: Gate, session: GateSession, options: { ow
     const { name } = request.params;
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
 
+    if (gate.seller !== undefined && (name.startsWith(META_PREFIX) || name === CAPSULE_TOOL.name)) {
+      return failure(`Unknown tool: ${name}`);
+    }
     if (name === CAPSULE_TOOL.name) {
       return server.projectCallToolResult(await capsuleCall(gate, session, args, ctx.mcpReq.signal), undefined);
     }
@@ -232,8 +288,15 @@ export function createGateServer(gate: Gate, session: GateSession, options: { ow
 
     session.touch(name);
     try {
-      const result = await gate.call(name, args, ctx.mcpReq.signal);
-      return server.projectCallToolResult(result, tool.outputSchema);
+      const signal = ctx.mcpReq.signal;
+      if (gate.seller?.priced(name) === true) {
+        const sold = await gate.seller.handle(name, request.params._meta as Record<string, unknown> | undefined, () => gate.call(name, args, signal));
+        return server.projectCallToolResult(sold, sold.isError === true ? undefined : tool.outputSchema);
+      }
+      let result = await gate.call(name, args, signal);
+      const required = gate.wallet === undefined ? undefined : readPaymentRequired(result);
+      if (required !== undefined) result = await payAndRetry(gate, session, name, args, required, signal);
+      return server.projectCallToolResult(result, result.isError === true ? undefined : tool.outputSchema);
     } catch (error) {
       return failure(`Calling ${name} failed: ${messageOf(error)}`);
     }

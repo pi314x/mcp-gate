@@ -7,6 +7,8 @@ export interface CatalogTool {
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   annotations?: Record<string, unknown>;
+  /** The tool's `_meta` as the server listed it; carries an x402 price when the tool is paid. */
+  meta?: Record<string, unknown>;
 }
 
 export const SEPARATOR = '__';

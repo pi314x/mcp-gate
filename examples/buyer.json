@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "pools": { "url": "https://pools.example.com/mcp" }
+  },
+  "buyer": {
+    "privateKey": "${MCP_GATE_WALLET_KEY}",
+    "allow": [{ "network": "eip155:84532", "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e", "decimals": 6, "symbol": "USDC" }],
+    "maxPerCall": "0.01",
+    "maxPerSession": "0.10",
+    "maxPerDay": "1.00",
+    "payTo": []
+  }
+}

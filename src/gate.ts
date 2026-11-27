@@ -4,6 +4,9 @@ import type { GateConfig } from './config.js';
 import { Downstream, connectorFor, type Connector, type DownstreamStatus } from './downstream.js';
 import { globToRegExp } from './glob.js';
 import type { LedgerRecorder } from './ledger.js';
+import { Wallet } from './pay/buyer.js';
+import { Seller } from './pay/seller.js';
+import { httpFacilitator, type Facilitator } from './pay/x402.js';
 import { messageOf, silentLog, type Logger } from './log.js';
 import { decide, type Decision } from './policy.js';
 
@@ -87,12 +90,28 @@ export class Gate {
   private readonly sessions = new Set<GateSession>();
   private sweeper: NodeJS.Timeout | undefined;
 
+  /** Paywall for priced tools (config `seller` + per-server `pricing`). */
+  readonly seller: Seller | undefined;
+  /** Pays priced tools of downstream servers (config `buyer`). */
+  readonly wallet: Wallet | undefined;
+
   constructor(
     readonly config: GateConfig,
     connectors: Record<string, Connector> = {},
     readonly log: Logger = silentLog,
-    readonly ledger?: LedgerRecorder
+    readonly ledger?: LedgerRecorder,
+    payments: { facilitator?: Facilitator; now?: () => number; today?: () => Date } = {}
   ) {
+    if (config.seller !== undefined) {
+      const prices = new Map<string, string>();
+      for (const [server, settings] of Object.entries(config.servers)) {
+        for (const [tool, price] of Object.entries(settings.pricing)) prices.set(qualify(server, tool), price);
+      }
+      this.seller = new Seller(config.seller, prices, payments.facilitator ?? httpFacilitator(config.seller.facilitatorUrl), payments.now);
+    } else {
+      this.seller = undefined;
+    }
+    this.wallet = config.buyer === undefined ? undefined : new Wallet(config.buyer, payments.today);
     for (const [name, server] of Object.entries(config.servers)) {
       this.downstreams.set(
         name,
@@ -139,11 +158,11 @@ export class Gate {
     return downstream === undefined ? { verdict: 'deny', reason: 'unknown server' } : decide(downstream.policy, tool.tool);
   }
 
-  async call(qualified: string, args: Record<string, unknown> | undefined, signal?: AbortSignal): Promise<CallToolResult> {
+  async call(qualified: string, args: Record<string, unknown> | undefined, signal?: AbortSignal, meta?: Record<string, unknown>): Promise<CallToolResult> {
     const tool = this.find(qualified);
     const downstream = tool === undefined ? undefined : this.downstreams.get(tool.server);
     if (tool === undefined || downstream === undefined) throw new Error(`no such tool: ${qualified}`);
-    return downstream.call(tool.tool, args, signal);
+    return downstream.call(tool.tool, args, signal, meta);
   }
 
   createSession(notify: () => void = () => undefined): GateSession {
@@ -179,6 +198,8 @@ export class Gate {
  */
 export class GateSession {
   private readonly active = new Map<string, Usage>();
+  /** Atomic units this session's wallet payments have committed, for the wallet's maxPerSession. */
+  spent = 0n;
 
   constructor(
     private readonly gate: Gate,
